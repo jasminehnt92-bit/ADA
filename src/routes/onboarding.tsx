@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
-import { useProfile, imagesForSwipe, MEASUREMENT_FIELDS, type Choice, type Profile } from "@/lib/ada-store";
+import { useProfile, MEASUREMENT_FIELDS, type Choice, type Profile } from "@/lib/ada-store";
 import { ArrowLeft, ArrowRight, Ruler } from "lucide-react";
 
 export const Route = createFileRoute("/onboarding")({
@@ -102,7 +102,6 @@ function Onboarding() {
   });
   const [cardIndex, setCardIndex] = useState(0);
   const [prefs, setPrefs] = useState<Record<string, Choice>>({});
-  const [pool, setPool] = useState<string[]>([]);
   const [measurements, setMeasurements] = useState<Record<string, string>>(() =>
     Object.fromEntries(MEASUREMENT_FIELDS.map((f) => [f.key, profile[f.key]?.toString() ?? ""])),
   );
@@ -121,7 +120,7 @@ function Onboarding() {
     setPrefs(nextPrefs);
     setPool(nextPool);
     if (cardIndex + 1 >= PREF_CARDS.length) {
-      update({ preferences: nextPrefs, moodboardPool: nextPool });
+      update({ preferences: nextPrefs });
       setStep(3);
     } else {
       setCardIndex(cardIndex + 1);

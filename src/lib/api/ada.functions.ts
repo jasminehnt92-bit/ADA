@@ -239,6 +239,7 @@ function classifyQuery(query: string): QueryMeta {
 async function ollamaChat(
   messages: OllamaMessage[],
   opts: {
+    model?: string;
     format?: "json";
     temperature?: number;
     numPredict?: number;
@@ -247,6 +248,7 @@ async function ollamaChat(
     topP?: number;
   } = {},
 ): Promise<string> {
+  const model = opts.model || OLLAMA_MODEL();
   const options: Record<string, unknown> = { temperature: opts.temperature ?? 0.7 };
   if (opts.numPredict !== undefined) options.num_predict = opts.numPredict;
   if (opts.stop) options.stop = opts.stop;
@@ -254,7 +256,7 @@ async function ollamaChat(
   if (opts.topP !== undefined) options.top_p = opts.topP;
 
   const body: Record<string, unknown> = {
-    model: OLLAMA_MODEL(),
+    model,
     messages,
     stream: false,
     options,
@@ -278,7 +280,7 @@ async function ollamaChat(
     const text = await res.text().catch(() => "");
     if (text.includes("model") && text.includes("not found")) {
       throw new Error(
-        `Modèle "${OLLAMA_MODEL()}" introuvable. Installe-le avec : ollama pull ${OLLAMA_MODEL()}`,
+        `Modèle "${model}" introuvable. Installe-le avec : ollama pull ${model}`,
       );
     }
     throw new Error(`Ollama erreur ${res.status}: ${text.slice(0, 120)}`);
@@ -310,6 +312,7 @@ const ProfileSchema = z.object({
   hanche: z.number().optional(),
   longueurBuste: z.number().optional(),
   longueurJambe: z.number().optional(),
+  ollamaModel: z.string().optional(),
   preferences: z.record(z.string()),
 });
 
@@ -399,6 +402,7 @@ export const chatWithAda = createServerFn({ method: "POST" })
     ];
 
     const raw = await ollamaChat(ollamaMessages, {
+      model: data.profile.ollamaModel,
       temperature: 0.4,
       topP: 0.9,
       numPredict: 120, // hard cap → ~2 sentences, prevents rambling

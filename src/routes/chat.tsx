@@ -101,6 +101,7 @@ function Chat() {
             hanche: profile.hanche,
             longueurBuste: profile.longueurBuste,
             longueurJambe: profile.longueurJambe,
+            ollamaModel: profile.ollamaModel,
             preferences: profile.preferences,
           },
         },

@@ -14,6 +14,7 @@ export type Profile = {
   hanche?: number;
   longueurBuste?: number;
   longueurJambe?: number;
+  ollamaModel?: string;
   preferences: Record<string, Choice>;
   moodboardPool: string[];
   onboarded: boolean;
@@ -64,6 +65,15 @@ export const MEASUREMENT_FIELDS: MeasurementField[] = [
   { key: "hanche", label: "Tour de hanches", hint: "À l'endroit le plus large", placeholder: "95" },
   { key: "longueurBuste", label: "Longueur de buste", hint: "De l'épaule à la taille", placeholder: "40" },
   { key: "longueurJambe", label: "Longueur de jambe", hint: "De l'entrejambe au sol", placeholder: "78" },
+];
+
+// ---------- Ollama model options ----------
+
+export type OllamaModelOption = { value: string; label: string };
+
+export const OLLAMA_MODEL_OPTIONS: OllamaModelOption[] = [
+  { value: "mistral", label: "Mistral 7B" },
+  { value: "llama3", label: "Llama 3" },
 ];
 
 // ---------- Preference labels ----------

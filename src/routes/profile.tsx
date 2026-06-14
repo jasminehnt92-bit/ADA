@@ -6,13 +6,14 @@ import {
   useDashboardStats,
   PREFERENCE_LABELS,
   MEASUREMENT_FIELDS,
+  OLLAMA_MODEL_OPTIONS,
   clearConversation,
   type Profile,
   type MeasurementField,
 } from "@/lib/ada-store";
 
 type MeasurementKey = MeasurementField["key"];
-import { Ruler } from "lucide-react";
+import { Ruler, Cpu } from "lucide-react";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({ meta: [{ title: "ADA — Profile" }] }),
@@ -124,6 +125,32 @@ function ProfilePage() {
                 <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">{f.hint}</p>
               </label>
             ))}
+          </div>
+        </section>
+
+        {/* AI model */}
+        <section>
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center border border-gold/40 bg-gold/10">
+              <Cpu className="h-3.5 w-3.5 text-gold" strokeWidth={1.5} />
+            </div>
+            <p className="text-[10px] uppercase tracking-[0.32em] text-muted-foreground">Modèle IA</p>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Choisis le modèle Ollama installé sur ta machine pour les conversations avec ADA.
+          </p>
+          <div className="mt-4">
+            <select
+              value={profile.ollamaModel ?? OLLAMA_MODEL_OPTIONS[0].value}
+              onChange={(e) => update({ ollamaModel: e.target.value })}
+              className="w-full border-0 border-b border-border bg-transparent pb-2 font-serif text-xl text-navy outline-none focus:border-navy"
+            >
+              {OLLAMA_MODEL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
         </section>
 

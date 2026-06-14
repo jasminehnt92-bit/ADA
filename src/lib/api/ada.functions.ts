@@ -12,9 +12,12 @@ const OLLAMA_MODEL = () => process.env.OLLAMA_MODEL ?? "llama3";
 
 // ---------- Types ----------
 
-export type SearchResult = {
+// Two shapes, discriminated by `mode`:
+//   - "link"   : a real scraped product + real Vinted alternatives + price model (3 columns)
+//   - "search" : a free-text query → a list of real Vinted listings (NO LLM, NO phantom links)
+export type LinkAnalysis = {
   query: string;
-  mode: "search" | "link"; // "search" = LLM text search · "link" = real scrape + Vinted, no LLM
+  mode: "link";
   original: {
     brand: string;
     name: string;
@@ -24,7 +27,7 @@ export type SearchResult = {
     promoMessage: string;
     link: string;
     imageCategory: string;
-    image: string | null; // real product photo (link mode); null → fall back to imageCategory
+    image: string | null; // real product photo; null → fall back to imageCategory
   };
   vinted: {
     title: string;
@@ -34,10 +37,10 @@ export type SearchResult = {
     link: string;
     discount: number;
     imageCategory: string;
-    image: string | null; // real Vinted photo (null → fall back to imageCategory)
-    real: boolean; // true when from the live Vinted API, false on fallback
+    image: string | null;
+    real: boolean;
   };
-  // Third column: a brand outlet (search mode, LLM) OR a second real Vinted listing (link mode).
+  // Second real Vinted listing.
   outlet?: {
     brand: string;
     price: number;
@@ -50,6 +53,16 @@ export type SearchResult = {
     condition?: string;
   };
 };
+
+export type VintedSearch = {
+  query: string;
+  mode: "search";
+  imageCategory: string; // placeholder image fallback for listings without a photo
+  items: ChatAlternative[]; // real Vinted listings
+  searchLink: string; // open the full query on Vinted
+};
+
+export type SearchResult = LinkAnalysis | VintedSearch;
 
 type OllamaMessage = { role: "system" | "user" | "assistant"; content: string };
 

@@ -1,0 +1,98 @@
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { AppShell, Header } from "@/components/ada/AppShell";
+import { useProfile, useDashboardStats, PREFERENCE_LABELS, clearConversation } from "@/lib/ada-store";
+
+export const Route = createFileRoute("/profile")({
+  head: () => ({ meta: [{ title: "ADA — Profile" }] }),
+  component: ProfilePage,
+});
+
+function ProfilePage() {
+  const { profile, update } = useProfile();
+  const stats = useDashboardStats();
+  const navigate = useNavigate();
+  const prefEntries = Object.entries(profile.preferences);
+
+  const reset = () => {
+    update({ name: "", email: "", age: undefined, sex: undefined, preferences: {}, onboarded: false });
+    clearConversation();
+    navigate({ to: "/onboarding" });
+  };
+
+  return (
+    <AppShell>
+      <Header eyebrow="Profile" title={profile.name || "Ton compte"} />
+
+      <div className="px-6 space-y-6">
+        {/* Identity */}
+        <section className="border border-border bg-cream p-6">
+          <p className="text-[10px] uppercase tracking-[0.32em] text-muted-foreground">Identité</p>
+          <div className="mt-4 space-y-3">
+            <InfoRow label="Email" value={profile.email || "—"} />
+            {profile.age && <InfoRow label="Âge" value={`${profile.age} ans`} />}
+            {profile.sex && <InfoRow label="Genre" value={profile.sex} />}
+          </div>
+        </section>
+
+        {/* Lifetime savings */}
+        <section className="border border-border bg-navy p-6 text-cream">
+          <p className="text-[10px] uppercase tracking-[0.32em] text-cream/70">Économies totales</p>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="font-serif text-5xl text-cream">+{Math.round(stats.totalSavings)}</span>
+            <span className="font-serif text-2xl text-gold">€</span>
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-3 border-t border-cream/15 pt-4 text-center text-cream/80">
+            <MiniStat label="Attendus" value={stats.waitedCount} />
+            <MiniStat label="Vinted" value={stats.swappedCount} />
+            <MiniStat label="Outlet" value={stats.outletCount} />
+          </div>
+        </section>
+
+        {/* Taste profile */}
+        <section>
+          <p className="text-[10px] uppercase tracking-[0.32em] text-muted-foreground">Profile de goût</p>
+          <ul className="mt-3 divide-y divide-border border-y border-border">
+            {prefEntries.length === 0 && (
+              <li className="py-4 text-sm text-muted-foreground">Aucune préférence encore.</li>
+            )}
+            {prefEntries.map(([k, v]) => {
+              const labels = PREFERENCE_LABELS[k];
+              const displayValue = labels ? (v === "left" ? labels.left : labels.right) : v === "left" ? "Option A" : "Option B";
+              return (
+                <li key={k} className="flex items-start justify-between gap-3 py-3 text-sm">
+                  <span className="capitalize text-navy">{k.replaceAll("_", " ")}</span>
+                  <span className="text-right text-[10px] uppercase tracking-[0.2em] text-gold">{displayValue}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <button
+          onClick={reset}
+          className="w-full border border-border bg-cream py-4 text-[11px] uppercase tracking-[0.32em] text-navy transition hover:border-navy"
+        >
+          Refaire l'onboarding
+        </button>
+      </div>
+    </AppShell>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between">
+      <p className="text-[10px] uppercase tracking-[0.28em] text-muted-foreground">{label}</p>
+      <p className="font-serif text-base text-navy">{value}</p>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <p className="font-serif text-xl text-cream">{value}</p>
+      <p className="mt-0.5 text-[9px] uppercase tracking-[0.2em] text-cream/60">{label}</p>
+    </div>
+  );
+}

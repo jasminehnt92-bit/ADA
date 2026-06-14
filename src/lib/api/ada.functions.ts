@@ -1,5 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import {
+  extractKeywords,
+  scrapeProductPage,
+  searchVinted,
+} from "./scraping.server";
+import { predictPrice } from "./pricing.server";
 
 const OLLAMA_URL = () => process.env.OLLAMA_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = () => process.env.OLLAMA_MODEL ?? "mistral";
@@ -8,6 +14,7 @@ const OLLAMA_MODEL = () => process.env.OLLAMA_MODEL ?? "mistral";
 
 export type SearchResult = {
   query: string;
+  mode: "search" | "link"; // "search" = LLM text search · "link" = real scrape + Vinted, no LLM
   original: {
     brand: string;
     name: string;
@@ -17,22 +24,30 @@ export type SearchResult = {
     promoMessage: string;
     link: string;
     imageCategory: string;
+    image: string | null; // real product photo (link mode); null → fall back to imageCategory
   };
   vinted: {
+    title: string;
     price: number;
     originalPrice: number;
     condition: string;
     link: string;
     discount: number;
     imageCategory: string;
+    image: string | null; // real Vinted photo (null → fall back to imageCategory)
+    real: boolean; // true when from the live Vinted API, false on fallback
   };
-  outlet: {
+  // Third column: a brand outlet (search mode, LLM) OR a second real Vinted listing (link mode).
+  outlet?: {
     brand: string;
     price: number;
     originalPrice: number;
     link: string;
     discount: number;
     imageCategory: string;
+    image: string | null;
+    title?: string;
+    condition?: string;
   };
 };
 
@@ -42,6 +57,8 @@ export type ParsedProduct = {
   price: number;
   originalPrice: number;
   imageCategory: string;
+  image: string | null; // real product photo when the page could be scraped
+  scraped: boolean; // true when name/price came from the live page
 };
 
 type OllamaMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -231,13 +248,26 @@ function classifyQuery(query: string): QueryMeta {
 
 async function ollamaChat(
   messages: OllamaMessage[],
-  opts: { format?: "json"; temperature?: number } = {},
+  opts: {
+    format?: "json";
+    temperature?: number;
+    numPredict?: number;
+    stop?: string[];
+    repeatPenalty?: number;
+    topP?: number;
+  } = {},
 ): Promise<string> {
+  const options: Record<string, unknown> = { temperature: opts.temperature ?? 0.7 };
+  if (opts.numPredict !== undefined) options.num_predict = opts.numPredict;
+  if (opts.stop) options.stop = opts.stop;
+  if (opts.repeatPenalty !== undefined) options.repeat_penalty = opts.repeatPenalty;
+  if (opts.topP !== undefined) options.top_p = opts.topP;
+
   const body: Record<string, unknown> = {
     model: OLLAMA_MODEL(),
     messages,
     stream: false,
-    options: { temperature: opts.temperature ?? 0.7 },
+    options,
   };
   if (opts.format === "json") body.format = "json";
 
@@ -289,33 +319,47 @@ const ProfileSchema = z.object({
 
 // ---------- chatWithAda ----------
 
-const CHAT_SYSTEM = `Tu es ADA (Accessible Design Advisor), une assistante mode française bienveillante et précise.
+const CHAT_SYSTEM = `Tu es ADA (Accessible Design Advisor), conseillère shopping mode française. Tu réponds de façon ULTRA concise, comme un SMS.
 
-MISSION : Aider l'utilisateur à trouver exactement ce qu'il cherche via un entonnoir de questions.
+TA MÉTHODE = UN ENTONNOIR. Tu cernes le besoin AVANT de conseiller :
+- Tant que tu n'as pas, pour le produit recherché, ces trois infos — (a) le TYPE de produit, (b) l'USAGE/occasion (ville, sport, mariage, travail…), (c) le BUDGET approximatif — tu poses UNE seule question courte pour la prochaine info manquante, et tu NE conclus PAS encore.
+- Une question de plus vaut mieux qu'une reco à côté de la plaque.
+- Quand tu as les trois infos, tu arrêtes de questionner, tu donnes ton ANGLE, et tu ajoutes le tag [SEARCH:...].
 
-PROCESSUS :
-1. Question ouverte si l'utilisateur est vague ("Qu'est-ce que tu recherches ?")
-2. Si l'utilisateur mentionne un article précis (marque, modèle, type) → passe directement à l'étape 3
-3. Questions de précision (2-3 max) : occasion, couleur, budget, taille/pointure, urgence
-4. Après 2 échanges minimum : propose la recherche avec [SEARCH:terme précis]
-5. Si refus → affine encore
+RÈGLES ABSOLUES :
+1. Réponds en UNE phrase, deux maximum. Jamais de liste, jamais de markdown, aucun emoji. Une seule question à la fois.
+2. NE CITE AUCUNE MARQUE ni nom de produit dans ta phrase. L'app affiche déjà les vrais produits sous ta réponse. Quand tu conclus, donne seulement L'ANGLE : acheter neuf maintenant, attendre une promo précise (nomme-la : soldes d'hiver, French Days, soldes d'été, Black Friday), ou viser la seconde main — plus UNE raison courte.
+3. La demande explicite de l'utilisateur PRIME sur son profil.
+4. MÉMOIRE STRICTE : le produit recherché ne change pas quand l'utilisateur ajoute un détail ("une veste" puis "pour un mariage" = une veste habillée). Relis tout le fil, ne te contredis jamais, ne redemande pas un critère déjà donné.
+5. N'invente jamais de prix chiffré, de stock ni de lien.
 
-FORMAT DU [SEARCH:...] — inclus toujours :
-- La marque exacte si connue (ex: Asics, Nike, Sézane)
-- Le modèle exact si mentionné (ex: Gel Kayano, Air Max 90)
-- Le type de produit en clair (ex: chaussures running, jupe midi, trench beige)
-- Caractéristiques importantes (couleur, matière, occasion)
+LE TAG [SEARCH:...] (uniquement quand tu conclus) doit contenir des mots-clés produits précis : type + caractéristiques (couleur, matière, occasion), et la marque/modèle SEULEMENT si l'utilisateur les a cités.
+Exemples : [SEARCH:jupe midi plissée beige femme casual] · [SEARCH:trench coat beige femme classique] · [SEARCH:sac tote cuir noir bureau]
 
-Exemples de [SEARCH:...] bien formés :
-[SEARCH:Asics Gel Kayano chaussures running femme]
-[SEARCH:jupe midi plissée beige femme casual]
-[SEARCH:trench coat beige femme classique imperméable]
-[SEARCH:sac tote cuir noir femme bureau]
+Exemple d'entonnoir :
+- "Une veste" → "Tu la veux pour quel usage, plutôt ville, sport ou une occasion habillée ?"
+- "Pour un mariage" → "Ok une veste habillée pour un mariage, tu mets quel budget environ ?"
+- "Autour de 100€" → "À ce budget je viserais la seconde main, tu fais une belle affaire sans rogner sur la qualité. [SEARCH:veste blazer habillée femme mariage]"`;
 
-RÈGLES :
-- Toujours en français, max 2-3 phrases par réponse
-- Ne jamais inventer des préférences non mentionnées
-- Tenir compte du profil utilisateur pour suggérer le bon budget/style`;
+// Client-side guardrail: strip markdown/lists the model may emit despite the prompt.
+function tidyReply(text: string): string {
+  return String(text || "")
+    .replace(/\*\*?|__|`/g, "")
+    .replace(/^\s*[-*•]\s+/gm, "")
+    .replace(/^\s*\d+[.)]\s+/gm, "")
+    .replace(/\s*\n+\s*/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+export type ChatAlternative = {
+  id: string;
+  title: string;
+  price: number;
+  url: string;
+  image: string | null;
+  condition: string | null;
+};
 
 export const chatWithAda = createServerFn({ method: "POST" })
   .inputValidator(z.object({ messages: z.array(MessageSchema), profile: ProfileSchema }))
@@ -342,13 +386,37 @@ export const chatWithAda = createServerFn({ method: "POST" })
       ...data.messages.map((m) => ({ role: m.role, content: m.content })),
     ];
 
-    const text = await ollamaChat(ollamaMessages, { temperature: 0.75 });
-    const searchMatch = text.match(/\[SEARCH:(.*?)\]/);
+    const raw = await ollamaChat(ollamaMessages, {
+      temperature: 0.4,
+      topP: 0.9,
+      numPredict: 120, // hard cap → ~2 sentences, prevents rambling
+      repeatPenalty: 1.3,
+    });
 
-    return {
-      text: text.replace(/\[SEARCH:[^\]]*\]/g, "").trim(),
-      searchQuery: searchMatch ? searchMatch[1].trim() : null,
-    };
+    const searchMatch = raw.match(/\[SEARCH:(.*?)\]/);
+    const searchQuery = searchMatch ? searchMatch[1].trim() : null;
+    const text = tidyReply(raw.replace(/\[SEARCH:[^\]]*\]/g, ""));
+
+    // When ADA concludes (a [SEARCH:...] term), pull real Vinted listings to show
+    // inline under her reply — the "previous site" funnel behavior.
+    let alternatives: ChatAlternative[] = [];
+    if (searchQuery) {
+      try {
+        const items = await searchVinted(extractKeywords(searchQuery), null, { limit: 3 });
+        alternatives = items.map((it) => ({
+          id: it.id,
+          title: it.title,
+          price: it.price,
+          url: it.url,
+          image: it.image,
+          condition: it.condition,
+        }));
+      } catch {
+        /* Vinted unavailable → just no inline suggestions */
+      }
+    }
+
+    return { text, searchQuery, alternatives };
   });
 
 // ---------- searchProducts ----------
@@ -412,48 +480,171 @@ Ne change PAS les valeurs déjà renseignées (imageCategory, liens Vinted/outle
   }
 }`;
 
-    const text = await ollamaChat(
-      [{ role: "user", content: userMessage }],
-      { format: "json", temperature: 0.2 },
-    );
+    // LLM (original + outlet advice) and the live Vinted search run in parallel.
+    // Vinted is the real data source now; the LLM only fills the "original"
+    // reference price and the outlet recommendation.
+    const [llmRes, vintedRes] = await Promise.allSettled([
+      ollamaChat([{ role: "user", content: userMessage }], { format: "json", temperature: 0.2 }),
+      searchVinted(extractKeywords(data.query), null, {
+        min: meta.priceMin * 0.3,
+        max: meta.priceMax,
+        limit: 1,
+      }),
+    ]);
 
+    if (llmRes.status !== "fulfilled") {
+      throw llmRes.reason instanceof Error
+        ? llmRes.reason
+        : new Error("Recherche indisponible — réessaie dans un instant.");
+    }
+
+    let parsed: SearchResult;
     try {
-      const parsed = JSON.parse(extractJson(text)) as SearchResult;
-      const originalPrice = Number(parsed.original?.price) || meta.priceMin;
-
-      // imageCategory is always from our classification — never trust the model for this
-      return {
-        query: data.query,
-        original: {
-          brand: parsed.original?.brand || meta.brands.split(",")[0].trim(),
-          name: parsed.original?.name || data.query,
-          price: originalPrice,
-          originalPrice: Number(parsed.original?.originalPrice) || originalPrice,
-          status: parsed.original?.status === "WAIT" ? "WAIT" : "BUY",
-          promoMessage: parsed.original?.promoMessage || "",
-          link: parsed.original?.link || "#",
-          imageCategory: meta.imageCategory,  // always from classifyQuery
-        },
-        vinted: {
-          price: Number(parsed.vinted?.price) || Math.round(originalPrice * 0.4),
-          originalPrice: originalPrice,
-          condition: parsed.vinted?.condition || "Bon état",
-          link: vinteLink,  // always the correct Vinted search URL
-          discount: Number(parsed.vinted?.discount) || 60,
-          imageCategory: meta.imageCategory,
-        },
-        outlet: {
-          brand: parsed.outlet?.brand || "Veepee",
-          price: Number(parsed.outlet?.price) || Math.round(originalPrice * 0.65),
-          originalPrice: originalPrice,
-          link: meta.outletUrl,  // always the correct outlet URL
-          discount: Number(parsed.outlet?.discount) || 35,
-          imageCategory: meta.imageCategory,
-        },
-      };
+      parsed = JSON.parse(extractJson(llmRes.value)) as SearchResult;
     } catch {
       throw new Error("Impossible de parser les résultats — réessaie ou reformule la recherche.");
     }
+
+    const originalPrice = Number(parsed.original?.price) || meta.priceMin;
+
+    // Real Vinted listing if the live search returned one, else a synthetic estimate.
+    const liveVinted = vintedRes.status === "fulfilled" ? vintedRes.value[0] : undefined;
+    const vintedPrice = liveVinted?.price ?? Math.round(originalPrice * 0.4);
+    const vintedDiscount =
+      originalPrice > 0 ? Math.max(0, Math.round((1 - vintedPrice / originalPrice) * 100)) : 60;
+
+    // imageCategory is always from our classification — never trust the model for this
+    return {
+      query: data.query,
+      mode: "search",
+      original: {
+        brand: parsed.original?.brand || meta.brands.split(",")[0].trim(),
+        name: parsed.original?.name || data.query,
+        price: originalPrice,
+        originalPrice: Number(parsed.original?.originalPrice) || originalPrice,
+        status: parsed.original?.status === "WAIT" ? "WAIT" : "BUY",
+        promoMessage: parsed.original?.promoMessage || "",
+        link: parsed.original?.link || "#",
+        imageCategory: meta.imageCategory,  // always from classifyQuery
+        image: null,
+      },
+      vinted: {
+        title: liveVinted?.title || `Vinted — ${data.query}`,
+        price: vintedPrice,
+        originalPrice: originalPrice,
+        condition: liveVinted?.condition || "Bon état",
+        link: liveVinted?.url || vinteLink,
+        discount: vintedDiscount,
+        imageCategory: meta.imageCategory,
+        image: liveVinted?.image ?? null,
+        real: Boolean(liveVinted),
+      },
+      outlet: {
+        brand: parsed.outlet?.brand || "Veepee",
+        price: Number(parsed.outlet?.price) || Math.round(originalPrice * 0.65),
+        originalPrice: originalPrice,
+        link: meta.outletUrl,  // always the correct outlet URL
+        discount: Number(parsed.outlet?.discount) || 35,
+        imageCategory: meta.imageCategory,
+        image: null,
+      },
+    };
+  });
+
+// ---------- analyzeProductLink (NO LLM — real scrape + Vinted + price model) ----------
+// This is the link-search path: it mirrors the previous project's /api/analyze.
+// The product comes from the real page, the alternatives from the live Vinted API,
+// and the BUY/WAIT call from the deterministic price model — no Ollama involved.
+
+export const analyzeProductLink = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ url: z.string() }))
+  .handler(async ({ data }): Promise<SearchResult> => {
+    let hostname = "";
+    let pathname = "";
+    try {
+      const u = new URL(data.url);
+      hostname = u.hostname;
+      pathname = u.pathname;
+    } catch {
+      hostname = "boutique";
+    }
+
+    // Real page scrape, with URL heuristics as fallback.
+    const scraped = data.url.startsWith("http") ? await scrapeProductPage(data.url) : null;
+    const name = scraped?.nom?.trim() || nameFromPathname(pathname);
+    const brand = scraped?.marque?.trim() || brandFromHostname(hostname);
+    const price = scraped?.prix_actuel ? Number(scraped.prix_actuel) : 0;
+    const meta = classifyQuery(`${pathname} ${hostname} ${name} ${brand}`);
+
+    // Real Vinted alternatives + deterministic price prediction (both no-LLM).
+    const keywords = extractKeywords(name, brand);
+    const [vintedRes] = await Promise.allSettled([
+      searchVinted(keywords, price > 0 ? price : null, {
+        min: price > 0 ? price * 0.2 : 0,
+        max: price > 0 ? price : Infinity,
+        limit: 4,
+      }),
+    ]);
+    const items = vintedRes.status === "fulfilled" ? vintedRes.value : [];
+    const prediction = price > 0 ? predictPrice({ prix_actuel: price, marque: brand, nom: name }) : null;
+
+    const discountVs = (p: number) =>
+      price > 0 ? Math.max(0, Math.round((1 - p / price) * 100)) : 0;
+
+    const v0 = items[0];
+    const v1 = items[1];
+
+    return {
+      query: name,
+      mode: "link",
+      original: {
+        brand,
+        name,
+        price,
+        originalPrice: price,
+        status: prediction ? (prediction.statut === "attendre" ? "WAIT" : "BUY") : "BUY",
+        promoMessage: prediction?.raison_prediction ?? "",
+        link: data.url,
+        imageCategory: meta.imageCategory,
+        image: scraped?.image ?? null,
+      },
+      vinted: v0
+        ? {
+            title: v0.title,
+            price: v0.price,
+            originalPrice: price || v0.price,
+            condition: v0.condition || "Bon état",
+            link: v0.url,
+            discount: discountVs(v0.price),
+            imageCategory: meta.imageCategory,
+            image: v0.image,
+            real: true,
+          }
+        : {
+            title: `Vinted — ${name}`,
+            price: price > 0 ? Math.round(price * 0.4) : 0,
+            originalPrice: price,
+            condition: "Bon état",
+            link: `https://www.vinted.fr/catalog?search_text=${encodeURIComponent(keywords.join(" "))}`,
+            discount: price > 0 ? 60 : 0,
+            imageCategory: meta.imageCategory,
+            image: null,
+            real: false,
+          },
+      outlet: v1
+        ? {
+            brand: "Vinted",
+            price: v1.price,
+            originalPrice: price || v1.price,
+            link: v1.url,
+            discount: discountVs(v1.price),
+            imageCategory: meta.imageCategory,
+            image: v1.image,
+            title: v1.title,
+            condition: v1.condition || "Bon état",
+          }
+        : undefined,
+    };
   });
 
 // ---------- parseProductLink (no LLM — instant URL parsing) ----------
@@ -499,7 +690,7 @@ function nameFromPathname(pathname: string): string {
 
 export const parseProductLink = createServerFn({ method: "POST" })
   .inputValidator(z.object({ url: z.string() }))
-  .handler(({ data }): ParsedProduct => {
+  .handler(async ({ data }): Promise<ParsedProduct> => {
     let hostname = "";
     let pathname = "";
     try {
@@ -510,9 +701,26 @@ export const parseProductLink = createServerFn({ method: "POST" })
       hostname = "boutique";
     }
 
-    const brand = brandFromHostname(hostname);
-    const name = nameFromPathname(pathname);
-    const meta = classifyQuery(`${pathname} ${hostname} ${name}`);
+    // URL heuristics as a baseline / fallback.
+    const urlBrand = brandFromHostname(hostname);
+    const urlName = nameFromPathname(pathname);
 
-    return { name, brand, price: 0, originalPrice: 0, imageCategory: meta.imageCategory };
+    // Try to actually read the page (JSON-LD / OpenGraph / DOM).
+    const scraped = data.url.startsWith("http") ? await scrapeProductPage(data.url) : null;
+    const ok = Boolean(scraped?.nom && scraped?.prix_actuel);
+
+    const name = scraped?.nom?.trim() || urlName;
+    const brand = scraped?.marque?.trim() || urlBrand;
+    const price = ok ? Number(scraped!.prix_actuel) : 0;
+    const meta = classifyQuery(`${pathname} ${hostname} ${name} ${brand}`);
+
+    return {
+      name,
+      brand,
+      price,
+      originalPrice: price,
+      imageCategory: meta.imageCategory,
+      image: scraped?.image ?? null,
+      scraped: ok,
+    };
   });

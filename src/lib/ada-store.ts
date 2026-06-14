@@ -411,6 +411,48 @@ export function homeMoodboardImages(
   return pickRandom(picked, picked.length);
 }
 
+// ---------- Moodboard → master prompt ----------
+
+// Style descriptor per image family. Local pools live under /styles/<folder>/,
+// so we recognise the folder; unsplash curated images fall back to the profile.
+const STYLE_DESCRIPTORS: Record<string, string> = {
+  minimalist: "un style minimaliste épuré : lignes nettes, coupes structurées, palette de tons neutres",
+  romantic: "un style romantique et féminin : matières fluides, détails délicats, silhouettes douces",
+  bold: "un style affirmé et statement : couleurs et coupes audacieuses, pièces qui se remarquent",
+  streatwear: "un look streetwear urbain et décontracté : pièces oversize, sneakers, esprit casual",
+};
+
+function descriptorForImage(src: string): string | null {
+  const folder = src.match(/\/styles\/([^/]+)\//)?.[1];
+  if (folder && STYLE_DESCRIPTORS[folder]) return STYLE_DESCRIPTORS[folder];
+  return null;
+}
+
+/**
+ * Turns a selected moodboard image into a "master prompt": a first-person
+ * opening message that seeds ADA's funnel with the image's style + the user's
+ * known profile (budget, source, origin). ADA then asks for the missing
+ * details (exact item, occasion) and concludes with real products.
+ */
+export function buildMoodboardMasterPrompt(
+  src: string,
+  prefs: Record<string, Choice> = {},
+): string {
+  const styleFromImage = descriptorForImage(src);
+  const styleFromProfile =
+    prefs["style"] === "right" ? STYLE_DESCRIPTORS.bold : STYLE_DESCRIPTORS.minimalist;
+  const style = styleFromImage ?? styleFromProfile;
+
+  const hints: string[] = [];
+  if (prefs["budget"] === "left") hints.push("avec un budget serré");
+  if (prefs["budget"] === "right") hints.push("je peux mettre le prix pour de la qualité");
+  if (prefs["source"] === "left") hints.push("je préfère la seconde main");
+  if (prefs["origin"] === "left") hints.push("idéalement Made in France ou Europe");
+  const hintLine = hints.length ? ` ${hints.join(", ")}.` : "";
+
+  return `Je suis inspirée par ${style}. Aide-moi à trouver une pièce dans cet esprit.${hintLine}`;
+}
+
 // ---------- Legacy helpers (kept for backward compat) ----------
 
 export function allCuratedFashionImages(): string[] {

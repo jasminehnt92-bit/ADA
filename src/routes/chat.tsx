@@ -1,21 +1,28 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { z } from "zod";
 import { AppShell, Header } from "@/components/ada/AppShell";
-import { Send, RefreshCw, Search } from "lucide-react";
+import { SafeImage } from "@/components/ada/SafeImage";
+import { Send, RefreshCw, Search, Tag, Plus, Check } from "lucide-react";
 import {
   useProfile,
+  useCart,
   loadConversation,
   saveConversation,
   clearConversation,
+  imageForCategory,
   type ConversationMessage,
 } from "@/lib/ada-store";
-import { chatWithAda } from "@/lib/api/ada.functions";
+import { chatWithAda, type ChatAlternative } from "@/lib/api/ada.functions";
+
+const chatSearchSchema = z.object({ seed: z.string().optional() });
 
 export const Route = createFileRoute("/chat")({
   head: () => ({ meta: [{ title: "ADA — Chat" }] }),
+  validateSearch: chatSearchSchema,
   component: Chat,
 });
 
@@ -25,7 +32,14 @@ type Msg = {
   text: string;
   isGreeting?: boolean;
   searchQuery?: string;
+  alternatives?: ChatAlternative[];
 };
+
+const SUGGESTIONS = [
+  "Une veste pour un mariage",
+  "Des sneakers tendance",
+  "Un trench beige pour la ville",
+];
 
 const GREETING_TEXT =
   "Bonjour ! Je suis ADA, ton assistante mode. Dis-moi ce que tu recherches — je vais t'aider à trouver la pièce parfaite au meilleur prix. 👀";
@@ -37,15 +51,19 @@ const CONTEXT_OPENER: ConversationMessage = {
 
 function Chat() {
   const navigate = useNavigate();
+  const { seed } = useSearch({ from: "/chat" });
   const { profile, ready } = useProfile();
+  const { add } = useCart();
 
   const [messages, setMessages] = useState<Msg[]>([
     { id: 0, from: "bot", text: GREETING_TEXT, isGreeting: true },
   ]);
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [input, setInput] = useState("");
+  const [addedAlts, setAddedAlts] = useState<Record<string, boolean>>({});
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const seedSent = useRef(false);
 
   // Load persisted conversation on mount
   useEffect(() => {
@@ -111,6 +129,7 @@ function Chat() {
       from: "bot",
       text: result.text,
       searchQuery: result.searchQuery ?? undefined,
+      alternatives: result.alternatives?.length ? result.alternatives : undefined,
     };
 
     const newConversation: ConversationMessage[] = [
@@ -122,6 +141,31 @@ function Chat() {
     setMessages((prev) => [...prev, botMsg]);
     setConversation(newConversation);
     saveConversation(newConversation);
+  };
+
+  // Master prompt from a moodboard image → auto-send it once the profile is ready,
+  // unless a conversation is already in progress.
+  useEffect(() => {
+    if (!seed || seedSent.current || !ready) return;
+    if (loadConversation().length > 0) return;
+    seedSent.current = true;
+    send(seed);
+    // strip the seed from the URL so a refresh doesn't replay it
+    navigate({ to: "/chat", search: {}, replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed, ready]);
+
+  const addAlt = (alt: ChatAlternative) => {
+    add({
+      name: alt.title,
+      brand: "Vinted",
+      price: alt.price,
+      originalPrice: alt.price,
+      image: alt.image ?? imageForCategory(),
+      source: "vinted",
+      link: alt.url,
+    });
+    setAddedAlts((prev) => ({ ...prev, [alt.id]: true }));
   };
 
   const handleYesSearch = (query: string) => {
@@ -198,6 +242,58 @@ function Chat() {
                         </button>
                       </div>
                     )}
+
+                    {/* Inline real Vinted listings when ADA concludes */}
+                    {m.alternatives && m.alternatives.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
+                          <Tag className="h-3 w-3 text-gold" />
+                          {m.alternatives.length} trouvaille{m.alternatives.length > 1 ? "s" : ""} sur Vinted
+                        </p>
+                        {m.alternatives.map((alt) => (
+                          <div
+                            key={alt.id}
+                            className="flex items-center gap-3 border border-border bg-cream p-2"
+                          >
+                            <div className="h-12 w-12 shrink-0 overflow-hidden bg-muted">
+                              <SafeImage
+                                src={alt.image ?? imageForCategory()}
+                                alt={alt.title}
+                                className="h-full w-full object-cover"
+                              />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-medium text-navy">{alt.title}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {alt.condition ? `${alt.condition} · ` : ""}
+                                <span className="font-serif text-navy">{alt.price.toFixed(2)}€</span>
+                              </p>
+                            </div>
+                            <a
+                              href={alt.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="shrink-0 text-[10px] uppercase tracking-[0.2em] text-navy underline-offset-4 hover:underline"
+                            >
+                              Voir
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => addAlt(alt)}
+                              disabled={addedAlts[alt.id]}
+                              aria-label="Ajouter au Super-Panier"
+                              className="grid h-8 w-8 shrink-0 place-items-center bg-navy text-cream transition hover:opacity-90 disabled:bg-gold"
+                            >
+                              {addedAlts[alt.id] ? (
+                                <Check className="h-4 w-4" />
+                              ) : (
+                                <Plus className="h-4 w-4" />
+                              )}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -226,6 +322,23 @@ function Chat() {
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Suggestion chips (first message only) */}
+          {messages.length === 1 && !adaThinking && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">Essaie :</span>
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => send(s)}
+                  className="border border-border bg-cream px-3 py-1.5 text-xs text-navy transition hover:border-navy"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
           <div ref={endRef} />
         </div>
 

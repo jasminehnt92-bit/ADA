@@ -1,13 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { toast } from "sonner";
-import { useMutation } from "@tanstack/react-query";
 import { AppShell, Header } from "@/components/ada/AppShell";
 import { SafeImage } from "@/components/ada/SafeImage";
 import { AnimatedNumber } from "@/components/ada/AnimatedNumber";
-import { useProfile, useCart, useDashboardStats, homeMoodboardImages, imageForCategory } from "@/lib/ada-store";
-import { parseProductLink } from "@/lib/api/ada.functions";
+import { useProfile, useDashboardStats, homeMoodboardImages, buildMoodboardMasterPrompt } from "@/lib/ada-store";
 import { ArrowRight, Plus, Loader2, Shuffle } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -17,7 +14,6 @@ export const Route = createFileRoute("/")({
 
 function Home() {
   const { profile, ready } = useProfile();
-  const { add } = useCart();
   const stats = useDashboardStats();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
@@ -37,37 +33,16 @@ function Home() {
     "aspect-[3/4]", "aspect-[4/5]",
   ];
 
-  const { mutateAsync: importLink, isPending: importingLink } = useMutation({
-    mutationFn: (url: string) => parseProductLink({ data: { url } }),
-    onSuccess: (product, url) => {
-      add({
-        name: product.name,
-        brand: product.brand,
-        price: product.price,
-        originalPrice: product.originalPrice,
-        image: imageForCategory(product.imageCategory),
-        source: "original",
-        link: url,
-      });
-      setLinkUrl("");
-      toast.success("Produit capturé — on cherche les alternatives…", {
-        description: `${product.brand} · ${product.name}`,
-      });
-      const searchQuery = [product.name, product.brand].filter(Boolean).join(" ");
-      navigate({ to: "/analysis", search: { q: searchQuery } });
-    },
-    onError: () => {
-      toast.error("Impossible d'analyser ce lien", {
-        description: "Vérifie l'URL ou ajoute l'article manuellement.",
-      });
-    },
-  });
+  const [importingLink, setImportingLink] = useState(false);
 
+  // Link search: hand the URL to /analysis, which does the real scrape + Vinted
+  // lookup + price prediction (no LLM).
   const handleImportLink = () => {
     if (!linkUrl.trim() || importingLink) return;
     let url = linkUrl.trim();
     if (!url.startsWith("http")) url = "https://" + url;
-    importLink(url);
+    setImportingLink(true);
+    navigate({ to: "/analysis", search: { url } });
   };
 
   return (
@@ -131,7 +106,11 @@ function Home() {
               transition={{ delay: i * 0.05, duration: 0.45, ease: "easeOut" }}
               className={`mb-2 break-inside-avoid overflow-hidden bg-muted ${ratios[i % ratios.length]} group relative cursor-pointer`}
             >
-              <Link to="/chat" className="block h-full w-full">
+              <Link
+                to="/chat"
+                search={{ seed: buildMoodboardMasterPrompt(src, profile.preferences) }}
+                className="block h-full w-full"
+              >
                 <SafeImage
                   src={src}
                   alt=""

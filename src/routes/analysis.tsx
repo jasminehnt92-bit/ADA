@@ -6,10 +6,10 @@ import { useQuery } from "@tanstack/react-query";
 import { AppShell, Header } from "@/components/ada/AppShell";
 import { SafeImage } from "@/components/ada/SafeImage";
 import { useCart, useProfile, imageForCategory } from "@/lib/ada-store";
-import { searchProducts, type SearchResult } from "@/lib/api/ada.functions";
+import { searchProducts, analyzeProductLink, type SearchResult } from "@/lib/api/ada.functions";
 import { Check, Clock, Loader2, Sparkles, Tag, MessageCircle } from "lucide-react";
 
-const searchSchema = z.object({ q: z.string().optional() });
+const searchSchema = z.object({ q: z.string().optional(), url: z.string().optional() });
 
 export const Route = createFileRoute("/analysis")({
   head: () => ({ meta: [{ title: "ADA — Analyse" }] }),
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/analysis")({
 });
 
 function Analysis() {
-  const { q } = useSearch({ from: "/analysis" });
+  const { q, url } = useSearch({ from: "/analysis" });
   const { profile, ready } = useProfile();
   const { add } = useCart();
 
@@ -29,24 +29,34 @@ function Analysis() {
     preferences: profile.preferences,
   };
 
+  // Link mode (url) → real scrape + Vinted + price model, NO LLM (no profile needed).
+  // Text mode (q)  → LLM search, needs the profile loaded.
+  const isLink = !!url;
+
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["search", q, ready],
-    queryFn: () => searchProducts({ data: { query: q!, profile: minimalProfile } }),
-    enabled: !!q && ready,
+    queryKey: isLink ? ["analyze-link", url] : ["search", q, ready],
+    queryFn: () =>
+      isLink
+        ? analyzeProductLink({ data: { url: url! } })
+        : searchProducts({ data: { query: q!, profile: minimalProfile } }),
+    enabled: isLink ? !!url : !!q && ready,
     staleTime: 5 * 60 * 1000,
     retry: 1,
   });
+
+  const hasInput = isLink || !!q;
+  const waitingProfile = !isLink && !ready;
 
   return (
     <AppShell>
       <Header eyebrow="Analyse considered" title="Trois chemins vers cette pièce." />
 
-      {!q ? (
+      {!hasInput ? (
         <NoQueryView />
-      ) : isLoading || !ready ? (
-        <LoadingView query={q} />
+      ) : isLoading || waitingProfile ? (
+        <LoadingView query={url ? "ton article" : q!} />
       ) : isError ? (
-        <ErrorView query={q} error={error} />
+        <ErrorView query={url ? "ton article" : q!} error={error} />
       ) : data ? (
         <ResultView result={data} onAdd={add} />
       ) : null}
@@ -127,15 +137,20 @@ function ResultView({
   result: SearchResult;
   onAdd: (item: Parameters<ReturnType<typeof useCart>["add"]>[0]) => void;
 }) {
+  const isLink = result.mode === "link";
   const originalPrice = result.original.price;
-  const originalImage = imageForCategory(result.original.imageCategory);
-  const vintedImage = imageForCategory(result.vinted.imageCategory);
-  const outletImage = imageForCategory(result.outlet.imageCategory);
+  // Prefer real photos (link mode); fall back to category placeholders.
+  const originalImage = result.original.image ?? imageForCategory(result.original.imageCategory);
+  const vintedImage = result.vinted.image ?? imageForCategory(result.vinted.imageCategory);
+  const outlet = result.outlet;
+  const outletImage = outlet ? (outlet.image ?? imageForCategory(outlet.imageCategory)) : "";
 
   return (
     <>
       <p className="mx-6 text-sm leading-relaxed text-muted-foreground">
-        ADA a analysé les marques, le marché de la seconde main et les déstockages pour{" "}
+        {isLink
+          ? "ADA a lu la page produit, interrogé Vinted en direct et estimé le meilleur moment d'achat pour "
+          : "ADA a analysé les marques, le marché de la seconde main et les déstockages pour "}
         <span className="text-navy">« {result.query} »</span>.
       </p>
 
@@ -175,17 +190,21 @@ function ResultView({
             label: `−${result.vinted.discount}%`,
             tone: "save",
           }}
-          title={`Vinted — ${result.query}`}
+          title={result.vinted.title}
           subtitle={result.vinted.condition}
           price={result.vinted.price}
           originalPrice={originalPrice}
           image={vintedImage}
           icon={<Tag className="h-4 w-4" />}
-          message={`Annonce vérifiée · ${result.vinted.condition}.`}
+          message={
+            result.vinted.real
+              ? `Annonce réelle Vinted · ${result.vinted.condition}.`
+              : `Estimation Vinted · ${result.vinted.condition}.`
+          }
           link={result.vinted.link}
           onAdd={() =>
             onAdd({
-              name: `Vinted — ${result.query}`,
+              name: result.vinted.title,
               brand: result.vinted.condition,
               price: result.vinted.price,
               originalPrice,
@@ -196,30 +215,32 @@ function ResultView({
           }
         />
 
-        <Column
-          index={2}
-          eyebrow="Déstockage marque"
-          badge={{ label: `−${result.outlet.discount}%`, tone: "gold" }}
-          title={`Outlet — ${result.query}`}
-          subtitle={result.outlet.brand}
-          price={result.outlet.price}
-          originalPrice={originalPrice}
-          image={outletImage}
-          icon={<Sparkles className="h-4 w-4" />}
-          message="Offre membres · stock limité."
-          link={result.outlet.link}
-          onAdd={() =>
-            onAdd({
-              name: `Outlet — ${result.query}`,
-              brand: result.outlet.brand,
-              price: result.outlet.price,
-              originalPrice,
-              image: outletImage,
-              source: "outlet",
-              link: result.outlet.link,
-            })
-          }
-        />
+        {outlet && (
+          <Column
+            index={2}
+            eyebrow={isLink ? "Aussi sur Vinted" : "Déstockage marque"}
+            badge={{ label: `−${outlet.discount}%`, tone: "gold" }}
+            title={isLink ? (outlet.title ?? `Vinted — ${result.query}`) : `Outlet — ${result.query}`}
+            subtitle={isLink ? (outlet.condition ?? "Bon état") : outlet.brand}
+            price={outlet.price}
+            originalPrice={originalPrice}
+            image={outletImage}
+            icon={<Sparkles className="h-4 w-4" />}
+            message={isLink ? "Seconde annonce réelle Vinted." : "Offre membres · stock limité."}
+            link={outlet.link}
+            onAdd={() =>
+              onAdd({
+                name: isLink ? (outlet.title ?? `Vinted — ${result.query}`) : `Outlet — ${result.query}`,
+                brand: isLink ? "Vinted" : outlet.brand,
+                price: outlet.price,
+                originalPrice,
+                image: outletImage,
+                source: isLink ? "vinted" : "outlet",
+                link: outlet.link,
+              })
+            }
+          />
+        )}
       </div>
 
       <div className="mt-10 px-6">

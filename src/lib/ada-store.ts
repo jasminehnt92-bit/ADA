@@ -8,6 +8,12 @@ export type Profile = {
   age?: string;
   sex?: string;
   birthday?: string;
+  hauteur?: number;
+  poitrine?: number;
+  tourTaille?: number;
+  hanche?: number;
+  longueurBuste?: number;
+  longueurJambe?: number;
   preferences: Record<string, Choice>;
   moodboardPool: string[];
   onboarded: boolean;
@@ -41,6 +47,24 @@ const DEFAULT_PROFILE: Profile = {
   moodboardPool: [],
   onboarded: false,
 };
+
+// ---------- Measurements ----------
+
+export type MeasurementField = {
+  key: "hauteur" | "poitrine" | "tourTaille" | "hanche" | "longueurBuste" | "longueurJambe";
+  label: string;
+  hint: string;
+  placeholder: string;
+};
+
+export const MEASUREMENT_FIELDS: MeasurementField[] = [
+  { key: "hauteur", label: "Taille (hauteur)", hint: "Du sol au sommet de la tête", placeholder: "168" },
+  { key: "poitrine", label: "Poitrine", hint: "Tour de buste, le plus ample", placeholder: "90" },
+  { key: "tourTaille", label: "Tour de taille", hint: "À l'endroit le plus fin", placeholder: "68" },
+  { key: "hanche", label: "Tour de hanches", hint: "À l'endroit le plus large", placeholder: "95" },
+  { key: "longueurBuste", label: "Longueur de buste", hint: "De l'épaule à la taille", placeholder: "40" },
+  { key: "longueurJambe", label: "Longueur de jambe", hint: "De l'entrejambe au sol", placeholder: "78" },
+];
 
 // ---------- Preference labels ----------
 

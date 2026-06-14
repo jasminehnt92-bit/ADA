@@ -304,6 +304,12 @@ const ProfileSchema = z.object({
   name: z.string(),
   age: z.string().optional(),
   sex: z.string().optional(),
+  hauteur: z.number().optional(),
+  poitrine: z.number().optional(),
+  tourTaille: z.number().optional(),
+  hanche: z.number().optional(),
+  longueurBuste: z.number().optional(),
+  longueurJambe: z.number().optional(),
   preferences: z.record(z.string()),
 });
 
@@ -358,6 +364,22 @@ export const chatWithAda = createServerFn({ method: "POST" })
       data.profile.name && `Prénom: ${data.profile.name}`,
       data.profile.age && `Âge: ${data.profile.age} ans`,
       data.profile.sex && `Genre: ${data.profile.sex}`,
+      (data.profile.hauteur ||
+        data.profile.poitrine ||
+        data.profile.tourTaille ||
+        data.profile.hanche ||
+        data.profile.longueurBuste ||
+        data.profile.longueurJambe) &&
+        `Mensurations : ${[
+          data.profile.hauteur && `taille ${data.profile.hauteur}cm`,
+          data.profile.poitrine && `poitrine ${data.profile.poitrine}cm`,
+          data.profile.tourTaille && `tour de taille ${data.profile.tourTaille}cm`,
+          data.profile.hanche && `hanche ${data.profile.hanche}cm`,
+          data.profile.longueurBuste && `longueur de buste ${data.profile.longueurBuste}cm`,
+          data.profile.longueurJambe && `longueur de jambe ${data.profile.longueurJambe}cm`,
+        ]
+          .filter(Boolean)
+          .join(", ")}`,
       data.profile.preferences["budget"] === "left" && "Budget serré (étudiant, max ~60€)",
       data.profile.preferences["budget"] === "right" && "Budget aisé",
       data.profile.preferences["source"] === "left" && "Préfère la seconde main (Vinted en priorité)",

@@ -1,8 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
-import { useProfile, imagesForSwipe, type Choice } from "@/lib/ada-store";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { useProfile, imagesForSwipe, MEASUREMENT_FIELDS, type Choice, type Profile } from "@/lib/ada-store";
+import { ArrowLeft, ArrowRight, Ruler } from "lucide-react";
 
 export const Route = createFileRoute("/onboarding")({
   head: () => ({ meta: [{ title: "Welcome to ADA" }] }),
@@ -93,7 +93,7 @@ const PREF_CARDS: Card[] = [
 function Onboarding() {
   const navigate = useNavigate();
   const { profile, update } = useProfile();
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [form, setForm] = useState({
     name: profile.name,
     email: profile.email,
@@ -103,6 +103,9 @@ function Onboarding() {
   const [cardIndex, setCardIndex] = useState(0);
   const [prefs, setPrefs] = useState<Record<string, Choice>>({});
   const [pool, setPool] = useState<string[]>([]);
+  const [measurements, setMeasurements] = useState<Record<string, string>>(() =>
+    Object.fromEntries(MEASUREMENT_FIELDS.map((f) => [f.key, profile[f.key]?.toString() ?? ""])),
+  );
 
   const handleSubmitInfo = (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,11 +121,30 @@ function Onboarding() {
     setPrefs(nextPrefs);
     setPool(nextPool);
     if (cardIndex + 1 >= PREF_CARDS.length) {
-      update({ preferences: nextPrefs, moodboardPool: nextPool, onboarded: true });
-      navigate({ to: "/" });
+      update({ preferences: nextPrefs, moodboardPool: nextPool });
+      setStep(3);
     } else {
       setCardIndex(cardIndex + 1);
     }
+  };
+
+  const finishOnboarding = (measurementsPatch: Partial<Profile>) => {
+    update({ ...measurementsPatch, onboarded: true });
+    navigate({ to: "/" });
+  };
+
+  const handleSubmitMeasurements = (e: React.FormEvent) => {
+    e.preventDefault();
+    const toNumber = (v: string) => (v.trim() ? Number(v) : undefined);
+    const patch: Partial<Profile> = {};
+    for (const f of MEASUREMENT_FIELDS) {
+      patch[f.key] = toNumber(measurements[f.key] ?? "");
+    }
+    finishOnboarding(patch);
+  };
+
+  const handleSkipMeasurements = () => {
+    finishOnboarding({});
   };
 
   return (
@@ -130,7 +152,7 @@ function Onboarding() {
       <div className="mx-auto flex min-h-screen max-w-md flex-col px-6 pb-10 pt-12">
         <div className="mb-10 flex flex-col items-center gap-4">
           <img src="/logo.jpeg" alt="ADA" className="h-40 w-auto object-contain" />
-          <p className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Step {step} / 2</p>
+          <p className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Step {step} / 3</p>
         </div>
 
         {step === 1 && (
@@ -245,6 +267,63 @@ function Onboarding() {
               {cardIndex + 1} of {PREF_CARDS.length}
             </p>
           </div>
+        )}
+
+        {step === 3 && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-1 flex-col">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center border border-gold/40 bg-gold/10">
+                <Ruler className="h-4 w-4 text-gold" strokeWidth={1.5} />
+              </div>
+              <p className="text-[10px] uppercase tracking-[0.32em] text-muted-foreground">Fine-tune your fit</p>
+            </div>
+            <h1 className="mt-4 font-serif text-4xl leading-tight">Tes mensurations.</h1>
+            <div className="mt-4 h-px w-12 bg-gold" />
+            <p className="mt-4 text-sm text-muted-foreground">
+              Totalement optionnel — quelques chiffres en plus, et on affine la coupe et la taille qu'on te propose.
+              Renseigne ce que tu connais, laisse le reste vide.
+            </p>
+
+            <form onSubmit={handleSubmitMeasurements} className="mt-8 flex flex-1 flex-col">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-7">
+                {MEASUREMENT_FIELDS.map((f) => (
+                  <label key={f.key} className="block">
+                    <span className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">{f.label}</span>
+                    <div className="mt-2 flex items-baseline border-0 border-b border-border pb-2 focus-within:border-navy">
+                      <input
+                        type="number"
+                        min="0"
+                        max="250"
+                        inputMode="numeric"
+                        value={measurements[f.key] ?? ""}
+                        onChange={(e) => setMeasurements({ ...measurements, [f.key]: e.target.value })}
+                        className="w-full border-0 bg-transparent font-serif text-xl text-navy outline-none"
+                        placeholder={f.placeholder}
+                      />
+                      <span className="shrink-0 text-xs text-muted-foreground">cm</span>
+                    </div>
+                    <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">{f.hint}</p>
+                  </label>
+                ))}
+              </div>
+
+              <div className="mt-10 flex gap-4">
+                <button
+                  type="button"
+                  onClick={handleSkipMeasurements}
+                  className="flex-1 border border-border bg-cream py-4 text-[11px] uppercase tracking-[0.32em] text-navy transition hover:border-navy"
+                >
+                  Passer
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-navy py-4 text-[11px] uppercase tracking-[0.32em] text-cream transition-opacity hover:opacity-90"
+                >
+                  Continue
+                </button>
+              </div>
+            </form>
+          </motion.div>
         )}
       </div>
     </div>

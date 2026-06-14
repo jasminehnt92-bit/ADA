@@ -1,6 +1,18 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { AppShell, Header } from "@/components/ada/AppShell";
-import { useProfile, useDashboardStats, PREFERENCE_LABELS, clearConversation } from "@/lib/ada-store";
+import {
+  useProfile,
+  useDashboardStats,
+  PREFERENCE_LABELS,
+  MEASUREMENT_FIELDS,
+  clearConversation,
+  type Profile,
+  type MeasurementField,
+} from "@/lib/ada-store";
+
+type MeasurementKey = MeasurementField["key"];
+import { Ruler } from "lucide-react";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({ meta: [{ title: "ADA — Profile" }] }),
@@ -12,6 +24,18 @@ function ProfilePage() {
   const stats = useDashboardStats();
   const navigate = useNavigate();
   const prefEntries = Object.entries(profile.preferences);
+
+  const [measurements, setMeasurements] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setMeasurements(
+      Object.fromEntries(MEASUREMENT_FIELDS.map((f) => [f.key, profile[f.key]?.toString() ?? ""])),
+    );
+  }, [profile]);
+
+  const saveMeasurement = (key: MeasurementKey, raw: string) => {
+    const value = raw.trim() ? Number(raw) : undefined;
+    update({ [key]: value } as Partial<Profile>);
+  };
 
   const reset = () => {
     update({ name: "", email: "", age: undefined, sex: undefined, preferences: {}, onboarded: false });
@@ -66,6 +90,41 @@ function ProfilePage() {
               );
             })}
           </ul>
+        </section>
+
+        {/* Measurements */}
+        <section>
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center border border-gold/40 bg-gold/10">
+              <Ruler className="h-3.5 w-3.5 text-gold" strokeWidth={1.5} />
+            </div>
+            <p className="text-[10px] uppercase tracking-[0.32em] text-muted-foreground">Mensurations</p>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Facultatif — utilisé pour t'aider à choisir la bonne taille. Modifie ou complète à tout moment.
+          </p>
+          <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-7">
+            {MEASUREMENT_FIELDS.map((f) => (
+              <label key={f.key} className="block">
+                <span className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">{f.label}</span>
+                <div className="mt-2 flex items-baseline border-0 border-b border-border pb-2 focus-within:border-navy">
+                  <input
+                    type="number"
+                    min="0"
+                    max="250"
+                    inputMode="numeric"
+                    value={measurements[f.key] ?? ""}
+                    onChange={(e) => setMeasurements({ ...measurements, [f.key]: e.target.value })}
+                    onBlur={(e) => saveMeasurement(f.key, e.target.value)}
+                    className="w-full border-0 bg-transparent font-serif text-xl text-navy outline-none"
+                    placeholder={f.placeholder}
+                  />
+                  <span className="shrink-0 text-xs text-muted-foreground">cm</span>
+                </div>
+                <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">{f.hint}</p>
+              </label>
+            ))}
+          </div>
         </section>
 
         <button

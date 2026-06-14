@@ -148,7 +148,7 @@ function Onboarding() {
     <div className="min-h-screen bg-cream text-navy">
       <div className="mx-auto flex min-h-screen max-w-md flex-col px-6 pb-10 pt-12">
         <div className="mb-10 flex flex-col items-center gap-4">
-          <img src="/logo.jpeg" alt="ADA" className="h-40 w-auto object-contain" />
+          <img src="/logo.png" alt="ADA" className="h-40 w-auto object-contain" />
           <p className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Step {step} / 3</p>
         </div>
 

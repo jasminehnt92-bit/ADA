@@ -19,7 +19,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="mx-auto max-w-md">
         <nav className="flex items-center px-6 pt-5 pb-1">
           <Link to="/" aria-label="ADA — Accueil">
-            <img src="/logo.jpeg" alt="ADA" className="h-12 w-auto object-contain" />
+            <img src="/logo.png" alt="ADA" className="h-12 w-auto object-contain" />
           </Link>
         </nav>
         <div className="pb-24">{children}</div>

@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell, Header } from "@/components/ada/AppShell";
+import { StyleVectorPanel } from "@/components/ada/StyleVectorPanel";
 import {
   useProfile,
   useDashboardStats,
@@ -72,6 +73,9 @@ function ProfilePage() {
             <MiniStat label="Outlet" value={stats.outletCount} />
           </div>
         </section>
+
+        {/* Learned style profile */}
+        <StyleVectorPanel />
 
         {/* Taste profile */}
         <section>

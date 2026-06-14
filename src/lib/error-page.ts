@@ -1,4 +1,25 @@
-export function renderErrorPage(): string {
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// In development we surface the real error (message + stack) so a failing
+// machine is self-diagnosing instead of showing a dead-end page. In production
+// we keep the generic, reassuring message.
+function devDetails(error?: unknown): string {
+  if (process.env.NODE_ENV === "production" || error == null) return "";
+  const message =
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  const stack = error instanceof Error && error.stack ? error.stack : "";
+  return `
+    <pre style="text-align:left;max-width:48rem;margin:1.5rem auto 0;padding:1rem;background:#0b1220;color:#e5e7eb;border-radius:0.5rem;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;">${escapeHtml(
+      message,
+    )}\n\n${escapeHtml(stack)}</pre>`;
+}
+
+export function renderErrorPage(error?: unknown): string {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -7,7 +28,7 @@ export function renderErrorPage(): string {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       body { font: 15px/1.5 system-ui, -apple-system, sans-serif; background: #fafafa; color: #111; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 1.5rem; }
-      .card { max-width: 28rem; width: 100%; text-align: center; padding: 2rem; }
+      .card { max-width: 52rem; width: 100%; text-align: center; padding: 2rem; }
       h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
       p { color: #4b5563; margin: 0 0 1.5rem; }
       .actions { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
@@ -24,6 +45,7 @@ export function renderErrorPage(): string {
         <button class="primary" onclick="location.reload()">Try again</button>
         <a class="secondary" href="/">Go home</a>
       </div>
+      ${devDetails(error)}
     </div>
   </body>
 </html>`;

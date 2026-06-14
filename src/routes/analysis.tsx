@@ -6,7 +6,13 @@ import { useQuery } from "@tanstack/react-query";
 import { AppShell, Header } from "@/components/ada/AppShell";
 import { SafeImage } from "@/components/ada/SafeImage";
 import { useCart, useProfile, imageForCategory } from "@/lib/ada-store";
-import { searchProducts, analyzeProductLink, type SearchResult } from "@/lib/api/ada.functions";
+import {
+  searchProducts,
+  analyzeProductLink,
+  type LinkAnalysis,
+  type VintedSearch,
+  type SearchResult,
+} from "@/lib/api/ada.functions";
 import { Check, Clock, Loader2, Sparkles, Tag, MessageCircle } from "lucide-react";
 
 const searchSchema = z.object({ q: z.string().optional(), url: z.string().optional() });
@@ -33,9 +39,9 @@ function Analysis() {
   // Text mode (q)  → LLM search, needs the profile loaded.
   const isLink = !!url;
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error } = useQuery<SearchResult>({
     queryKey: isLink ? ["analyze-link", url] : ["search", q, ready],
-    queryFn: () =>
+    queryFn: (): Promise<SearchResult> =>
       isLink
         ? analyzeProductLink({ data: { url: url! } })
         : searchProducts({ data: { query: q!, profile: minimalProfile } }),
@@ -58,7 +64,11 @@ function Analysis() {
       ) : isError ? (
         <ErrorView query={url ? "ton article" : q!} error={error} />
       ) : data ? (
-        <ResultView result={data} onAdd={add} />
+        data.mode === "search" ? (
+          <SearchResultView result={data} onAdd={add} />
+        ) : (
+          <ResultView result={data} onAdd={add} />
+        )
       ) : null}
     </AppShell>
   );
@@ -129,11 +139,151 @@ function ErrorView({ query, error }: { query: string; error: unknown }) {
   );
 }
 
+function SearchResultView({
+  result,
+  onAdd,
+}: {
+  result: VintedSearch;
+  onAdd: (item: Parameters<ReturnType<typeof useCart>["add"]>[0]) => void;
+}) {
+  const fallback = imageForCategory(result.imageCategory);
+
+  return (
+    <>
+      <p className="mx-6 text-sm leading-relaxed text-muted-foreground">
+        {result.items.length > 0
+          ? "Voici de vraies annonces Vinted trouvées en direct pour "
+          : "Aucune annonce Vinted disponible pour le moment pour "}
+        <span className="text-navy">« {result.query} »</span>.
+      </p>
+
+      {result.items.length === 0 ? (
+        <div className="mt-6 px-6">
+          <a
+            href={result.searchLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-full border border-border bg-cream py-4 text-center text-[11px] uppercase tracking-[0.28em] text-navy transition hover:border-navy"
+          >
+            Voir la recherche sur Vinted
+          </a>
+        </div>
+      ) : (
+        <>
+          <div className="mt-8 grid grid-cols-2 gap-4 px-6">
+            {result.items.map((item, i) => (
+              <VintedCard key={item.id} item={item} index={i} fallback={fallback} onAdd={onAdd} />
+            ))}
+          </div>
+          <div className="mt-8 px-6">
+            <a
+              href={result.searchLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full border border-border bg-cream py-3 text-center text-[11px] uppercase tracking-[0.28em] text-navy transition hover:border-navy"
+            >
+              Voir tout sur Vinted
+            </a>
+          </div>
+        </>
+      )}
+
+      <div className="mt-6 px-6">
+        <Link
+          to="/chat"
+          className="block w-full bg-navy py-4 text-center text-[11px] uppercase tracking-[0.32em] text-cream transition hover:opacity-90"
+        >
+          Affiner avec ADA
+        </Link>
+      </div>
+    </>
+  );
+}
+
+function VintedCard({
+  item,
+  index,
+  fallback,
+  onAdd,
+}: {
+  item: VintedSearch["items"][number];
+  index: number;
+  fallback: string;
+  onAdd: (item: Parameters<ReturnType<typeof useCart>["add"]>[0]) => void;
+}) {
+  const [added, setAdded] = useState(false);
+  const image = item.image ?? fallback;
+
+  return (
+    <motion.article
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05 }}
+      className="flex flex-col overflow-hidden border border-border bg-cream"
+    >
+      <a
+        href={item.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="relative block aspect-square overflow-hidden"
+        aria-label={`Ouvrir ${item.title} sur Vinted`}
+      >
+        <SafeImage
+          src={image}
+          alt={item.title}
+          className="h-full w-full object-cover transition-transform duration-200 ease-in-out hover:scale-[1.02]"
+        />
+        <span className="absolute left-2 top-2 bg-navy px-2 py-0.5 text-[9px] uppercase tracking-[0.18em] text-cream">
+          Vinted
+        </span>
+      </a>
+      <div className="flex flex-1 flex-col p-3">
+        <h3 className="line-clamp-2 font-serif text-sm leading-tight text-navy">{item.title}</h3>
+        {item.condition && (
+          <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            {item.condition}
+          </p>
+        )}
+        <div className="mt-auto flex items-baseline gap-1 pt-2">
+          <span className="font-serif text-xl text-navy">{item.price.toFixed(2)}</span>
+          <span className="font-serif text-xs text-gold">€</span>
+        </div>
+      </div>
+      <button
+        onClick={() => {
+          if (added) return;
+          onAdd({
+            name: item.title,
+            brand: "Vinted",
+            price: item.price,
+            originalPrice: item.price,
+            image,
+            source: "vinted",
+            link: item.url,
+          });
+          setAdded(true);
+        }}
+        className={`flex w-full items-center justify-center gap-2 border-t border-border py-2.5 text-[10px] uppercase tracking-[0.24em] transition ${
+          added ? "bg-cream text-gold" : "bg-cream text-navy hover:bg-navy hover:text-cream"
+        }`}
+      >
+        {added ? (
+          <>
+            <Check className="h-3.5 w-3.5" /> Ajouté
+          </>
+        ) : (
+          "Ajouter au panier"
+        )}
+      </button>
+    </motion.article>
+  );
+}
+
 function ResultView({
   result,
   onAdd,
 }: {
-  result: SearchResult;
+  result: LinkAnalysis;
   onAdd: (item: Parameters<ReturnType<typeof useCart>["add"]>[0]) => void;
 }) {
   const isLink = result.mode === "link";

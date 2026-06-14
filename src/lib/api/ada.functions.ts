@@ -301,11 +301,6 @@ async function ollamaChat(
   return (json?.message?.content as string) ?? "";
 }
 
-function extractJson(text: string): string {
-  const match = text.match(/\{[\s\S]*\}/);
-  return match ? match[0] : text;
-}
-
 // ---------- Zod schemas ----------
 
 const MessageSchema = z.object({
@@ -426,131 +421,34 @@ export const chatWithAda = createServerFn({ method: "POST" })
 
 export const searchProducts = createServerFn({ method: "POST" })
   .inputValidator(z.object({ query: z.string(), profile: ProfileSchema }))
-  .handler(async ({ data }): Promise<SearchResult> => {
+  .handler(async ({ data }): Promise<VintedSearch> => {
+    // Text search is now Vinted-only — NO LLM, NO phantom links. We hit the live
+    // Vinted API and return the real listings; classifyQuery only gives us a
+    // placeholder image category for listings without a photo.
     const meta = classifyQuery(data.query);
+    const searchLink = `https://www.vinted.fr/catalog?search_text=${encodeURIComponent(data.query)}`;
 
-    const profileDesc = [
-      data.profile.preferences["budget"] === "left" && "budget serré — privilégie les marques abordables",
-      data.profile.preferences["budget"] === "right" && "budget aisé — marques premium OK",
-      data.profile.preferences["source"] === "left" && "préfère la seconde main",
-      data.profile.preferences["origin"] === "left" && "préfère Made in France/Europe",
-    ]
-      .filter(Boolean)
-      .join(", ");
-
-    const vinteLink = `https://www.vinted.fr/catalog?search_text=${encodeURIComponent(data.query)}`;
-
-    // The prompt pre-fills all fixed values (imageCategory, URLs) so the model
-    // only has to fill in brand, name, prices and short text fields.
-    const userMessage = `Génère des résultats pour la recherche suivante et retourne UNIQUEMENT le JSON complété.
-
-RECHERCHE : "${data.query}"
-TYPE DE PRODUIT : ${meta.productType}
-MARQUES APPROPRIÉES : ${meta.brands}
-FOURCHETTE DE PRIX : ${meta.priceMin}€ – ${meta.priceMax}€
-${profileDesc ? `PROFIL : ${profileDesc}` : ""}
-
-Complète ce JSON en remplaçant les <balises> par les vraies valeurs.
-Ne change PAS les valeurs déjà renseignées (imageCategory, liens Vinted/outlet).
-
-{
-  "query": "${data.query}",
-  "original": {
-    "brand": "<meilleure marque parmi : ${meta.brands}>",
-    "name": "<nom exact du produit ${meta.productType} correspondant à la recherche>",
-    "price": <prix réaliste entre ${meta.priceMin} et ${meta.priceMax}>,
-    "originalPrice": <même valeur ou légèrement plus élevée>,
-    "status": "<WAIT si des soldes/promotions sont probables dans les 4 prochaines semaines, sinon BUY>",
-    "promoMessage": "<une phrase de conseil sur le bon moment d'achat ou les promotions prévues>",
-    "link": "<URL réelle de la page de recherche sur le site officiel de la marque>",
-    "imageCategory": "${meta.imageCategory}"
-  },
-  "vinted": {
-    "price": <entre 50% et 70% moins cher que original.price>,
-    "originalPrice": <copie exacte de original.price>,
-    "condition": "<Très bon état, Bon état, ou Neuf avec étiquette>",
-    "link": "${vinteLink}",
-    "discount": <pourcentage de réduction entre 50 et 70>,
-    "imageCategory": "${meta.imageCategory}"
-  },
-  "outlet": {
-    "brand": "<site outlet pertinent : Veepee, Zalando Privé, BrandAlley, ou La Redoute Soldes>",
-    "price": <entre 30% et 50% moins cher que original.price>,
-    "originalPrice": <copie exacte de original.price>,
-    "link": "${meta.outletUrl}",
-    "discount": <pourcentage de réduction entre 30 et 50>,
-    "imageCategory": "${meta.imageCategory}"
-  }
-}`;
-
-    // LLM (original + outlet advice) and the live Vinted search run in parallel.
-    // Vinted is the real data source now; the LLM only fills the "original"
-    // reference price and the outlet recommendation.
-    const [llmRes, vintedRes] = await Promise.allSettled([
-      ollamaChat([{ role: "user", content: userMessage }], { format: "json", temperature: 0.2 }),
-      searchVinted(extractKeywords(data.query), null, {
-        min: meta.priceMin * 0.3,
-        max: meta.priceMax,
-        limit: 1,
-      }),
-    ]);
-
-    if (llmRes.status !== "fulfilled") {
-      throw llmRes.reason instanceof Error
-        ? llmRes.reason
-        : new Error("Recherche indisponible — réessaie dans un instant.");
-    }
-
-    let parsed: SearchResult;
+    let items: ChatAlternative[] = [];
     try {
-      parsed = JSON.parse(extractJson(llmRes.value)) as SearchResult;
+      const found = await searchVinted(extractKeywords(data.query), null, { limit: 8 });
+      items = found.map((it) => ({
+        id: it.id,
+        title: it.title,
+        price: it.price,
+        url: it.url,
+        image: it.image,
+        condition: it.condition,
+      }));
     } catch {
-      throw new Error("Impossible de parser les résultats — réessaie ou reformule la recherche.");
+      /* Vinted unavailable → empty list; the UI shows the "open on Vinted" link */
     }
 
-    const originalPrice = Number(parsed.original?.price) || meta.priceMin;
-
-    // Real Vinted listing if the live search returned one, else a synthetic estimate.
-    const liveVinted = vintedRes.status === "fulfilled" ? vintedRes.value[0] : undefined;
-    const vintedPrice = liveVinted?.price ?? Math.round(originalPrice * 0.4);
-    const vintedDiscount =
-      originalPrice > 0 ? Math.max(0, Math.round((1 - vintedPrice / originalPrice) * 100)) : 60;
-
-    // imageCategory is always from our classification — never trust the model for this
     return {
       query: data.query,
       mode: "search",
-      original: {
-        brand: parsed.original?.brand || meta.brands.split(",")[0].trim(),
-        name: parsed.original?.name || data.query,
-        price: originalPrice,
-        originalPrice: Number(parsed.original?.originalPrice) || originalPrice,
-        status: parsed.original?.status === "WAIT" ? "WAIT" : "BUY",
-        promoMessage: parsed.original?.promoMessage || "",
-        link: parsed.original?.link || "#",
-        imageCategory: meta.imageCategory,  // always from classifyQuery
-        image: null,
-      },
-      vinted: {
-        title: liveVinted?.title || `Vinted — ${data.query}`,
-        price: vintedPrice,
-        originalPrice: originalPrice,
-        condition: liveVinted?.condition || "Bon état",
-        link: liveVinted?.url || vinteLink,
-        discount: vintedDiscount,
-        imageCategory: meta.imageCategory,
-        image: liveVinted?.image ?? null,
-        real: Boolean(liveVinted),
-      },
-      outlet: {
-        brand: parsed.outlet?.brand || "Veepee",
-        price: Number(parsed.outlet?.price) || Math.round(originalPrice * 0.65),
-        originalPrice: originalPrice,
-        link: meta.outletUrl,  // always the correct outlet URL
-        discount: Number(parsed.outlet?.discount) || 35,
-        imageCategory: meta.imageCategory,
-        image: null,
-      },
+      imageCategory: meta.imageCategory,
+      items,
+      searchLink,
     };
   });
 
@@ -561,7 +459,7 @@ Ne change PAS les valeurs déjà renseignées (imageCategory, liens Vinted/outle
 
 export const analyzeProductLink = createServerFn({ method: "POST" })
   .inputValidator(z.object({ url: z.string() }))
-  .handler(async ({ data }): Promise<SearchResult> => {
+  .handler(async ({ data }): Promise<LinkAnalysis> => {
     let hostname = "";
     let pathname = "";
     try {

@@ -51,16 +51,6 @@ export type SearchResult = {
   };
 };
 
-export type ParsedProduct = {
-  name: string;
-  brand: string;
-  price: number;
-  originalPrice: number;
-  imageCategory: string;
-  image: string | null; // real product photo when the page could be scraped
-  scraped: boolean; // true when name/price came from the live page
-};
-
 type OllamaMessage = { role: "system" | "user" | "assistant"; content: string };
 
 // ---------- Query classification (runs BEFORE the LLM call) ----------
@@ -647,7 +637,7 @@ export const analyzeProductLink = createServerFn({ method: "POST" })
     };
   });
 
-// ---------- parseProductLink (no LLM — instant URL parsing) ----------
+// ---------- URL heuristics (shared fallback for link analysis) ----------
 
 const DOMAIN_BRANDS: Record<string, string> = {
   sezane: "Sézane", zara: "Zara", uniqlo: "Uniqlo", mango: "Mango",
@@ -688,39 +678,3 @@ function nameFromPathname(pathname: string): string {
   return slug.charAt(0).toUpperCase() + slug.slice(1);
 }
 
-export const parseProductLink = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ url: z.string() }))
-  .handler(async ({ data }): Promise<ParsedProduct> => {
-    let hostname = "";
-    let pathname = "";
-    try {
-      const parsed = new URL(data.url);
-      hostname = parsed.hostname;
-      pathname = parsed.pathname;
-    } catch {
-      hostname = "boutique";
-    }
-
-    // URL heuristics as a baseline / fallback.
-    const urlBrand = brandFromHostname(hostname);
-    const urlName = nameFromPathname(pathname);
-
-    // Try to actually read the page (JSON-LD / OpenGraph / DOM).
-    const scraped = data.url.startsWith("http") ? await scrapeProductPage(data.url) : null;
-    const ok = Boolean(scraped?.nom && scraped?.prix_actuel);
-
-    const name = scraped?.nom?.trim() || urlName;
-    const brand = scraped?.marque?.trim() || urlBrand;
-    const price = ok ? Number(scraped!.prix_actuel) : 0;
-    const meta = classifyQuery(`${pathname} ${hostname} ${name} ${brand}`);
-
-    return {
-      name,
-      brand,
-      price,
-      originalPrice: price,
-      imageCategory: meta.imageCategory,
-      image: scraped?.image ?? null,
-      scraped: ok,
-    };
-  });

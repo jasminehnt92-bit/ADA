@@ -1,10 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { toast } from "sonner";
+import { useState } from "react";
 import { AppShell, Header } from "@/components/ada/AppShell";
-import { SafeImage } from "@/components/ada/SafeImage";
-import { CURATED_MOODBOARD, curatedMoodboardFor, useCart, useProfile } from "@/lib/ada-store";
-import { ArrowRight, Link as LinkIcon, Search as SearchIcon } from "lucide-react";
+import { ArrowRight, Search as SearchIcon } from "lucide-react";
 
 export const Route = createFileRoute("/search")({
   head: () => ({ meta: [{ title: "ADA — Search" }] }),
@@ -19,37 +16,6 @@ const SUGGESTIONS = [
 
 function SearchPage() {
   const [q, setQ] = useState("");
-  const [addingLink, setAddingLink] = useState(false);
-  const { add } = useCart();
-  const { profile } = useProfile();
-
-  const inspirations = useMemo(() => {
-    const curated = curatedMoodboardFor(profile.preferences || {});
-    if (curated.length >= 3) return curated.slice(0, 4);
-    // Fallback to a tasteful default fashion set (never landscapes).
-    return CURATED_MOODBOARD.classic_elegant_mood.student_day.slice(0, 4);
-  }, [profile.preferences?.style, profile.preferences?.budget, profile.preferences?.occasion]);
-
-  const handleAddLink = () => {
-    if (addingLink) return;
-    setAddingLink(true);
-    setTimeout(() => {
-      try {
-        add({
-          name: "Article importé (Lien)",
-          brand: "Lien externe",
-          price: 0,
-          originalPrice: 0,
-          image: "https://picsum.photos/seed/ada-lien/200/200",
-          source: "original",
-        });
-        setQ("");
-        toast.success("Article ajouté au Super-Panier", { description: "En cours d'analyse…" });
-      } finally {
-        setAddingLink(false);
-      }
-    }, 1000);
-  };
 
   return (
     <AppShell>

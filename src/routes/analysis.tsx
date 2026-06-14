@@ -103,7 +103,8 @@ function LoadingView({ query }: { query: string }) {
 
 function ErrorView({ query, error }: { query: string; error: unknown }) {
   const msg = error instanceof Error ? error.message : "Erreur inconnue";
-  const isApiKey = msg.includes("ANTHROPIC_API_KEY");
+  // The search/chat engine is a local LLM (Ollama). Surface that when it's down.
+  const isOllamaDown = msg.includes("Ollama") || msg.includes("introuvable");
 
   return (
     <div className="px-6">
@@ -112,12 +113,10 @@ function ErrorView({ query, error }: { query: string; error: unknown }) {
       </p>
       <div className="mt-6 border border-border bg-cream p-8 text-center">
         <p className="font-serif text-lg leading-snug text-navy">
-          {isApiKey ? "Clé API manquante" : "Impossible de charger les résultats"}
+          {isOllamaDown ? "Assistant IA indisponible" : "Impossible de charger les résultats"}
         </p>
         <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-          {isApiKey
-            ? "Configure la variable ANTHROPIC_API_KEY dans ton fichier .env pour activer la recherche IA."
-            : "Réessaie dans un instant ou affine ta recherche via le chat."}
+          {isOllamaDown ? msg : "Réessaie dans un instant ou affine ta recherche via le chat."}
         </p>
         <Link
           to="/chat"

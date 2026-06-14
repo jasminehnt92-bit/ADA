@@ -42,7 +42,7 @@ function ProfilePage() {
             <span className="font-serif text-2xl text-gold">€</span>
           </div>
           <div className="mt-4 grid grid-cols-3 gap-3 border-t border-cream/15 pt-4 text-center text-cream/80">
-            <MiniStat label="Attendus" value={stats.waitedCount} />
+            <MiniStat label="Neufs" value={stats.waitedCount} />
             <MiniStat label="Vinted" value={stats.swappedCount} />
             <MiniStat label="Outlet" value={stats.outletCount} />
           </div>

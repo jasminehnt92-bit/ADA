@@ -65,7 +65,7 @@ function Home() {
           Sur <AnimatedNumber value={stats.totalPurchases} /> article{stats.totalPurchases !== 1 ? "s" : ""} considéré{stats.totalPurchases !== 1 ? "s" : ""}.
         </p>
         <div className="mt-5 grid grid-cols-3 gap-3 border-t border-border pt-5 text-center">
-          <Stat label="Attendus" value={stats.waitedCount} />
+          <Stat label="Neufs" value={stats.waitedCount} />
           <Stat label="Vinted" value={stats.swappedCount} />
           <Stat label="Outlet" value={stats.outletCount} />
         </div>

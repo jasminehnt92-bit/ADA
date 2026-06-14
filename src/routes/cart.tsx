@@ -39,15 +39,15 @@ function CartPage() {
         {items.length === 0 ? (
           <div className="flex flex-col items-center gap-4 border border-dashed border-border bg-cream p-10 text-center">
             <ShoppingBag className="h-6 w-6 text-muted-foreground" strokeWidth={1.5} />
-            <p className="font-serif text-xl text-navy">Vider le panier.</p>
+            <p className="font-serif text-xl text-navy">Panier vide.</p>
             <p className="text-xs text-muted-foreground">
-              Search a piece, let ADA find smarter alternatives, then add the one you love.
+              Cherche une pièce, laisse ADA trouver les meilleures alternatives, puis ajoute celle que tu préfères.
             </p>
             <Link
               to="/search"
               className="mt-2 bg-navy px-5 py-3 text-[11px] uppercase tracking-[0.28em] text-cream transition hover:opacity-90"
             >
-              Start searching
+              Commencer la recherche
             </Link>
           </div>
         ) : (
@@ -96,7 +96,7 @@ function CartPage() {
                           )}
                           {i.originalPrice > i.price && (
                             <span className="ml-auto text-[10px] uppercase tracking-[0.24em] text-gold">
-                              saved {i.originalPrice - i.price}€
+                              −{i.originalPrice - i.price}€
                             </span>
                           )}
                         </>

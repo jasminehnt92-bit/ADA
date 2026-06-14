@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
-import { useProfile, imagesForSwipe, type Choice } from "@/lib/ada-store";
+import { useProfile, type Choice } from "@/lib/ada-store";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
 export const Route = createFileRoute("/onboarding")({
@@ -102,7 +102,6 @@ function Onboarding() {
   });
   const [cardIndex, setCardIndex] = useState(0);
   const [prefs, setPrefs] = useState<Record<string, Choice>>({});
-  const [pool, setPool] = useState<string[]>([]);
 
   const handleSubmitInfo = (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,11 +113,9 @@ function Onboarding() {
   const handleSwipe = (dir: Choice) => {
     const card = PREF_CARDS[cardIndex];
     const nextPrefs = { ...prefs, [card.key]: dir };
-    const nextPool = [...pool, ...imagesForSwipe(cardIndex + 1, dir)];
     setPrefs(nextPrefs);
-    setPool(nextPool);
     if (cardIndex + 1 >= PREF_CARDS.length) {
-      update({ preferences: nextPrefs, moodboardPool: nextPool, onboarded: true });
+      update({ preferences: nextPrefs, onboarded: true });
       navigate({ to: "/" });
     } else {
       setCardIndex(cardIndex + 1);

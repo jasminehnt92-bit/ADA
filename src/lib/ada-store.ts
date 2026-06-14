@@ -9,7 +9,6 @@ export type Profile = {
   sex?: string;
   birthday?: string;
   preferences: Record<string, Choice>;
-  moodboardPool: string[];
   onboarded: boolean;
 };
 
@@ -38,7 +37,6 @@ const DEFAULT_PROFILE: Profile = {
   name: "",
   email: "",
   preferences: {},
-  moodboardPool: [],
   onboarded: false,
 };
 
@@ -78,29 +76,6 @@ export function imageForCategory(category?: string): string {
   if (!category) return CATEGORY_IMAGES.accessories;
   const normalized = (category || "").toLowerCase();
   return CATEGORY_IMAGES[normalized] ?? CATEGORY_IMAGES.accessories;
-}
-
-// ---------- Moodboard golden dataset (card 1..10) ----------
-
-const datasetSeed = (card: number, side: "left" | "right", i: number) =>
-  `https://picsum.photos/seed/ada-c${card}-${side}-${i}/400/600`;
-
-export const MOODBOARD_DATASET: Record<number, { left: string[]; right: string[] }> =
-  Object.fromEntries(
-    Array.from({ length: 10 }, (_, idx) => {
-      const card = idx + 1;
-      return [
-        card,
-        {
-          left: [0, 1, 2].map((i) => datasetSeed(card, "left", i)),
-          right: [0, 1, 2].map((i) => datasetSeed(card, "right", i)),
-        },
-      ];
-    }),
-  );
-
-export function imagesForSwipe(cardIndex1Based: number, choice: Choice): string[] {
-  return MOODBOARD_DATASET[cardIndex1Based]?.[choice] ?? [];
 }
 
 export function pickRandom<T>(arr: T[], n: number): T[] {
@@ -205,7 +180,6 @@ export function useCart() {
     ];
     saveCart(next);
     setItems(next);
-    bumpStatsOnAdd(item.source, Math.max(0, item.originalPrice - item.price));
   };
   const remove = (id: string) => {
     const next = loadCart().filter((i) => i.id !== id);
@@ -230,7 +204,6 @@ export type DashboardStats = {
   outletCount: number;
 };
 
-const STATS_KEY = "ada-stats-v2";
 const DEFAULT_STATS: DashboardStats = {
   totalSavings: 0,
   totalPurchases: 0,
@@ -239,114 +212,34 @@ const DEFAULT_STATS: DashboardStats = {
   outletCount: 0,
 };
 
-function loadStats(): DashboardStats {
-  if (typeof window === "undefined") return DEFAULT_STATS;
-  try {
-    const raw = localStorage.getItem(STATS_KEY);
-    return raw ? { ...DEFAULT_STATS, ...JSON.parse(raw) } : DEFAULT_STATS;
-  } catch {
-    return DEFAULT_STATS;
-  }
-}
-
-function saveStats(s: DashboardStats) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STATS_KEY, JSON.stringify(s));
-  window.dispatchEvent(new Event("ada-stats-change"));
-}
-
-function bumpStatsOnAdd(source: "original" | "vinted" | "outlet", savedAmount: number) {
-  const cur = loadStats();
-  saveStats({
-    totalSavings: cur.totalSavings + savedAmount,
-    totalPurchases: cur.totalPurchases + 1,
-    waitedCount: cur.waitedCount + (source === "original" ? 1 : 0),
-    swappedCount: cur.swappedCount + (source === "vinted" ? 1 : 0),
-    outletCount: cur.outletCount + (source === "outlet" ? 1 : 0),
-  });
+// Stats are DERIVED from the cart (single source of truth) so they stay correct
+// when items are added, removed or cleared — no separate accumulator to drift.
+function statsFromCart(items: CartItem[]): DashboardStats {
+  return {
+    totalSavings: items.reduce((s, i) => s + Math.max(0, i.originalPrice - i.price), 0),
+    totalPurchases: items.length,
+    waitedCount: items.filter((i) => i.source === "original").length,
+    swappedCount: items.filter((i) => i.source === "vinted").length,
+    outletCount: items.filter((i) => i.source === "outlet").length,
+  };
 }
 
 export function useDashboardStats() {
   const [stats, setStats] = useState<DashboardStats>(DEFAULT_STATS);
   useEffect(() => {
-    setStats(loadStats());
-    const sync = () => setStats(loadStats());
-    window.addEventListener("ada-stats-change", sync);
+    const sync = () => setStats(statsFromCart(loadCart()));
+    sync();
+    window.addEventListener("ada-cart-change", sync);
     window.addEventListener("storage", sync);
     return () => {
-      window.removeEventListener("ada-stats-change", sync);
+      window.removeEventListener("ada-cart-change", sync);
       window.removeEventListener("storage", sync);
     };
   }, []);
   return stats;
 }
 
-// ---------- Taste profile helpers ----------
-
-export function hasTightBudget(prefs: Record<string, Choice>): boolean {
-  return prefs["budget"] === "left";
-}
-
-// ---------- Curated moodboard (Style × Budget × Occasion) ----------
-
-const u = (id: string) => `https://images.unsplash.com/${id}?w=600&q=80&auto=format&fit=crop`;
-
-export const CURATED_MOODBOARD = {
-  classic_elegant_mood: {
-    student_day: [
-      u("photo-1515886657613-9f3515b0c78f"),
-      u("photo-1582738411706-bfc8e691d1c2"),
-      u("photo-1434389677669-e08b4cac3105"),
-    ],
-    student_night: [
-      u("photo-1594119932179-c567a5078500"),
-      u("photo-1596755094514-f87e34085b2c"),
-      u("photo-1603251642434-24cde3194a2f"),
-    ],
-    salary_day: [
-      u("photo-1594913785162-e678ac46440e"),
-      u("photo-1616421526435-08e750e3347b"),
-      u("photo-1603252109360-909baaf261c7"),
-    ],
-    salary_night: [
-      u("photo-1441986300917-64674bd600d8"),
-      u("photo-1560243563-062bff001d68"),
-      u("photo-1534081048630-d464e815616b"),
-    ],
-  },
-  streetwear_bold_mood: {
-    student_day: [
-      u("photo-1552374196-1ab2a1c593e8"),
-      u("photo-1509281373149-e957c6296406"),
-      u("photo-1511556532299-8f662fc26c06"),
-    ],
-    student_night: [
-      u("photo-1618354691373-d851c5c3a990"),
-      u("photo-1595950653106-6c9ebd614d3a"),
-      u("photo-1600185365483-26d7a4cc7519"),
-    ],
-    salary_day: [
-      u("photo-1487222477894-8943e31ef7b2"),
-      u("photo-1584305323473-d672ece518d2"),
-      u("photo-1613040809024-b4ef7ba99bc3"),
-    ],
-    salary_night: [
-      u("photo-1492707892479-7bc8d5a4ee93"),
-      u("photo-1496181133206-80ce9b88a853"),
-      u("photo-1608234808654-2a8875faa7fd"),
-    ],
-  },
-} as const;
-
-export function curatedMoodboardFor(prefs: Record<string, Choice>): string[] {
-  const style = prefs["style"] === "right" ? "streetwear_bold_mood" : "classic_elegant_mood";
-  const budget = prefs["budget"] === "right" ? "salary" : "student";
-  const occasion = prefs["occasion"] === "right" ? "night" : "day";
-  const key = `${budget}_${occasion}` as "student_day" | "student_night" | "salary_day" | "salary_night";
-  return [...CURATED_MOODBOARD[style][key]];
-}
-
-// ---------- Extended fashion pools (local images from /styles/) ----------
+// ---------- Fashion pools (local images from /styles/) ----------
 
 const local = (folder: string, file: string) => `/styles/${folder}/${file}`;
 
@@ -453,100 +346,3 @@ export function buildMoodboardMasterPrompt(
   return `Je suis inspirée par ${style}. Aide-moi à trouver une pièce dans cet esprit.${hintLine}`;
 }
 
-// ---------- Legacy helpers (kept for backward compat) ----------
-
-export function allCuratedFashionImages(): string[] {
-  return Array.from(new Set([...CLASSIC_POOL, ...BOLD_POOL]));
-}
-
-export function uniqueShuffledFashion(n: number): string[] {
-  return pickRandom(allCuratedFashionImages(), n);
-}
-
-// ---------- Catalog (kept for fallback) ----------
-
-const picsum = (seed: number, w = 400, h = 600) => `https://picsum.photos/seed/ada${seed}/${w}/${h}`;
-
-export const MOODBOARD = Array.from({ length: 9 }, (_, i) => picsum(100 + i));
-
-export type HardcodedItem = {
-  id: string;
-  keywords: string[];
-  original: {
-    brand: string;
-    name: string;
-    price: number;
-    status: "WAIT" | "BUY";
-    message: string;
-    image: string;
-    link: string;
-  };
-  vinted: {
-    price: number;
-    condition: string;
-    link: string;
-  };
-  outlet: {
-    price: number;
-    brand: string;
-    link: string;
-  };
-};
-
-export const HARDCODED_ITEMS: HardcodedItem[] = [
-  {
-    id: "item1",
-    keywords: ["jupe", "plissée", "plissee", "académique", "academique", "skirt"],
-    original: {
-      brand: "Uniqlo",
-      name: "Jupe Plissée Asymétrique",
-      price: 39.9,
-      status: "WAIT",
-      message: "Baisse à 29€ prévue la semaine prochaine.",
-      image: "https://images.unsplash.com/photo-1582142306909-195724d33ffc?w=400&q=80",
-      link: "https://www.uniqlo.com",
-    },
-    vinted: { price: 12.0, condition: "Très bon état", link: "https://www.vinted.fr/catalog?search_text=jupe+plissée" },
-    outlet: { price: 19.9, brand: "Mango Outlet", link: "https://www.mangooutlet.com" },
-  },
-  {
-    id: "item2",
-    keywords: ["trench", "beige", "manteau", "coat"],
-    original: {
-      brand: "Zara",
-      name: "Trench-Coat Classique",
-      price: 89.9,
-      status: "BUY",
-      message: "Prix historiquement bas pour la saison.",
-      image: "https://images.unsplash.com/photo-1434389677669-e08b4cac3105?w=400&q=80",
-      link: "https://www.zara.com",
-    },
-    vinted: { price: 35.0, condition: "Neuf avec étiquette", link: "https://www.vinted.fr/catalog?search_text=trench+coat" },
-    outlet: { price: 55.0, brand: "Zalando Privé", link: "https://www.zalando-prive.fr" },
-  },
-  {
-    id: "item3",
-    keywords: ["mocassin", "mocassins", "chaussure", "chaussures", "cuir", "loafer", "loafers"],
-    original: {
-      brand: "Jonak",
-      name: "Mocassins en Cuir Noir",
-      price: 135.0,
-      status: "WAIT",
-      message: "Ventes privées dans 14 jours.",
-      image: "https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=400&q=80",
-      link: "https://www.jonak.fr",
-    },
-    vinted: { price: 45.0, condition: "Bon état", link: "https://www.vinted.fr/catalog?search_text=mocassins+cuir" },
-    outlet: { price: 85.0, brand: "Jonak Outlet", link: "https://www.jonak.fr/outlet" },
-  },
-];
-
-export function findHardcodedItem(query: string): HardcodedItem | null {
-  const q = (query || "").toLowerCase().trim();
-  if (!q) return null;
-  return (
-    HARDCODED_ITEMS.find((item) =>
-      item.keywords.some((kw) => q.includes(kw.toLowerCase())),
-    ) ?? null
-  );
-}

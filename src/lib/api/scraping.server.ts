@@ -276,12 +276,52 @@ function parseHtml(html: string): ScrapedProduct {
   return fromSelectors($);
 }
 
+// SSRF guard: only allow public http(s) URLs. Blocks localhost, private,
+// loopback and link-local (cloud metadata) addresses so a user-supplied link
+// can't make the server reach internal services (e.g. Ollama on :11434).
+function isPublicHttpUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+
+  const host = u.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return false;
+
+  // IPv6 literal (URL hostnames keep brackets stripped) — block loopback/ULA/link-local.
+  if (host.includes(":")) {
+    if (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return false;
+    return true;
+  }
+
+  // IPv4 literal — block private / loopback / link-local / unspecified ranges.
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const [a, b] = m.slice(1).map(Number);
+    if (a === 10 || a === 127 || a === 0) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 169 && b === 254) return false; // link-local incl. cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    return true;
+  }
+
+  // A hostname with no dot is almost always an intranet name — reject.
+  return host.includes(".");
+}
+
+const MAX_SCRAPE_BYTES = 3_000_000; // cap parsed HTML to avoid huge-response DoS
+
 /**
  * Level-1 scraper: HTTP fetch + cheerio parse (JSON-LD → OpenGraph → DOM).
- * Returns null on block / network error / empty page so callers can fall back
- * to URL-based heuristics. No Playwright (level 2 dropped on purpose).
+ * Returns null on block / network error / empty page (or a non-public URL) so
+ * callers can fall back to URL-based heuristics. No Playwright (level 2 dropped).
  */
 export async function scrapeProductPage(url: string): Promise<ScrapedProduct | null> {
+  if (!isPublicHttpUrl(url)) return null;
+
   let res: Response;
   try {
     res = await fetch(url, {
@@ -295,7 +335,7 @@ export async function scrapeProductPage(url: string): Promise<ScrapedProduct | n
 
   if (res.status === 403 || res.status === 429) return null;
 
-  const html = await res.text().catch(() => "");
+  const html = (await res.text().catch(() => "")).slice(0, MAX_SCRAPE_BYTES);
   const blocked =
     html.includes("Just a moment") ||
     html.includes("Enable JavaScript and cookies") ||

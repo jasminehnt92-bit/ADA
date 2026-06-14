@@ -6,6 +6,7 @@ import {
   searchVinted,
 } from "./scraping.server";
 import { predictPrice } from "./pricing.server";
+import { buildStyleVectorSummary } from "@/lib/ada-store";
 
 const OLLAMA_URL = () => process.env.OLLAMA_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = () => process.env.OLLAMA_MODEL ?? "mistral";
@@ -302,6 +303,19 @@ const MessageSchema = z.object({
   content: z.string(),
 });
 
+const StyleVectorSchema = z.object({
+  casual: z.number(),
+  bold: z.number(),
+  minimaliste: z.number(),
+  romantique: z.number(),
+  streetwear: z.number(),
+  prix_sensibilite: z.number(),
+  seconde_main_affinite: z.number(),
+  luxe_affinite: z.number(),
+  sport: z.number(),
+  vintage: z.number(),
+});
+
 const ProfileSchema = z.object({
   name: z.string(),
   age: z.string().optional(),
@@ -313,6 +327,7 @@ const ProfileSchema = z.object({
   longueurBuste: z.number().optional(),
   longueurJambe: z.number().optional(),
   ollamaModel: z.string().optional(),
+  styleVector: StyleVectorSchema.optional(),
   preferences: z.record(z.string()),
 });
 
@@ -390,6 +405,9 @@ export const chatWithAda = createServerFn({ method: "POST" })
       data.profile.preferences["style"] === "left" && "Style minimaliste/classique",
       data.profile.preferences["style"] === "right" && "Style bold/tendance",
       data.profile.preferences["frequency"] === "right" && "Achats fréquents/impulsifs",
+      data.profile.styleVector &&
+        buildStyleVectorSummary(data.profile.styleVector) &&
+        `Profil de style appris : ${buildStyleVectorSummary(data.profile.styleVector)}`,
     ]
       .filter(Boolean)
       .join(", ");

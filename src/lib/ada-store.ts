@@ -2,6 +2,47 @@ import { useEffect, useState } from "react";
 
 export type Choice = "left" | "right";
 
+// ---------- Style vector ----------
+
+export type StyleVector = {
+  casual: number;
+  bold: number;
+  minimaliste: number;
+  romantique: number;
+  streetwear: number;
+  prix_sensibilite: number;
+  seconde_main_affinite: number;
+  luxe_affinite: number;
+  sport: number;
+  vintage: number;
+};
+
+export const STYLE_VECTOR_DIMENSIONS: (keyof StyleVector)[] = [
+  "casual",
+  "bold",
+  "minimaliste",
+  "romantique",
+  "streetwear",
+  "prix_sensibilite",
+  "seconde_main_affinite",
+  "luxe_affinite",
+  "sport",
+  "vintage",
+];
+
+export const NEUTRAL_STYLE_VECTOR: StyleVector = {
+  casual: 0.5,
+  bold: 0.5,
+  minimaliste: 0.5,
+  romantique: 0.5,
+  streetwear: 0.5,
+  prix_sensibilite: 0.5,
+  seconde_main_affinite: 0.5,
+  luxe_affinite: 0.5,
+  sport: 0.5,
+  vintage: 0.5,
+};
+
 export type Profile = {
   name: string;
   email: string;
@@ -15,6 +56,7 @@ export type Profile = {
   longueurBuste?: number;
   longueurJambe?: number;
   ollamaModel?: string;
+  styleVector?: StyleVector;
   preferences: Record<string, Choice>;
   moodboardPool: string[];
   onboarded: boolean;
@@ -46,6 +88,7 @@ const DEFAULT_PROFILE: Profile = {
   email: "",
   preferences: {},
   moodboardPool: [],
+  styleVector: NEUTRAL_STYLE_VECTOR,
   onboarded: false,
 };
 
@@ -151,7 +194,12 @@ export function loadProfile(): Profile {
   try {
     const raw = localStorage.getItem(PROFILE_KEY);
     if (!raw) return DEFAULT_PROFILE;
-    return { ...DEFAULT_PROFILE, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_PROFILE,
+      ...parsed,
+      styleVector: { ...NEUTRAL_STYLE_VECTOR, ...(parsed.styleVector ?? {}) },
+    };
   } catch {
     return DEFAULT_PROFILE;
   }
@@ -177,6 +225,133 @@ export function useProfile() {
     });
   };
   return { profile, update, ready };
+}
+
+// ---------- Style vector helpers ----------
+
+export function updateStyleVector(
+  current: StyleVector,
+  signal: Partial<StyleVector>,
+  weight = 0.15,
+): StyleVector {
+  const next = { ...current };
+  for (const key of STYLE_VECTOR_DIMENSIONS) {
+    const signalValue = signal[key];
+    if (signalValue === undefined) continue;
+    next[key] = current[key] * (1 - weight) + signalValue * weight;
+  }
+  return next;
+}
+
+export function cosineSimilarity(a: StyleVector, b: StyleVector): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (const key of STYLE_VECTOR_DIMENSIONS) {
+    dot += a[key] * b[key];
+    normA += a[key] * a[key];
+    normB += b[key] * b[key];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+export function useStyleVector() {
+  const { profile, update } = useProfile();
+  const vector = profile.styleVector ?? NEUTRAL_STYLE_VECTOR;
+  const updateVector = (signal: Partial<StyleVector>, weight = 0.15) => {
+    update({ styleVector: updateStyleVector(vector, signal, weight) });
+  };
+  return { vector, updateVector };
+}
+
+// Maps a swipe answer ("<carte>:<choix>") to the style-vector dimensions it informs.
+const SWIPE_SIGNAL_MAP: Record<string, Partial<StyleVector>> = {
+  "style:left": { minimaliste: 0.9, bold: 0.1 },
+  "style:right": { bold: 0.9, streetwear: 0.7, minimaliste: 0.1 },
+  "values:left": { luxe_affinite: 0.7, prix_sensibilite: 0.3 },
+  "values:right": { casual: 0.7, prix_sensibilite: 0.7 },
+  "source:left": { seconde_main_affinite: 0.9, vintage: 0.6 },
+  "source:right": { seconde_main_affinite: 0.1, luxe_affinite: 0.6 },
+  "budget:left": { prix_sensibilite: 0.9 },
+  "budget:right": { prix_sensibilite: 0.2, luxe_affinite: 0.6 },
+  "origin:left": { luxe_affinite: 0.6, vintage: 0.5 },
+  "origin:right": { streetwear: 0.5 },
+  "frequency:left": { prix_sensibilite: 0.6 },
+  "frequency:right": { casual: 0.7 },
+  "wait:left": { prix_sensibilite: 0.7 },
+  "wait:right": { prix_sensibilite: 0.2 },
+  "material:left": { romantique: 0.6, luxe_affinite: 0.5 },
+  "material:right": { prix_sensibilite: 0.6, streetwear: 0.4 },
+  "occasion:left": { casual: 0.8, sport: 0.4 },
+  "occasion:right": { romantique: 0.6, bold: 0.6 },
+  "goal:left": { minimaliste: 0.7 },
+  "goal:right": { bold: 0.5, vintage: 0.4 },
+};
+
+export function inferSignalFromSwipe(preference: string): Partial<StyleVector> {
+  return SWIPE_SIGNAL_MAP[preference] ?? {};
+}
+
+export function inferSignalFromCart(item: Pick<CartItem, "source" | "price">): Partial<StyleVector> {
+  const signal: Partial<StyleVector> = {};
+  if (item.source === "vinted") {
+    signal.seconde_main_affinite = 0.9;
+    signal.prix_sensibilite = 0.7;
+  } else if (item.source === "outlet") {
+    signal.prix_sensibilite = 0.7;
+    signal.luxe_affinite = 0.5;
+  } else {
+    signal.seconde_main_affinite = 0.1;
+    signal.luxe_affinite = 0.6;
+  }
+  if (item.price < 30) {
+    signal.prix_sensibilite = Math.max(signal.prix_sensibilite ?? 0, 0.8);
+  } else if (item.price > 100) {
+    signal.luxe_affinite = Math.max(signal.luxe_affinite ?? 0, 0.7);
+  }
+  return signal;
+}
+
+// Keyword-based signal extraction from a user chat message — lets the style
+// vector keep learning from conversation, not just onboarding/cart.
+const MESSAGE_SIGNAL_KEYWORDS: { pattern: RegExp; signal: Partial<StyleVector> }[] = [
+  { pattern: /seconde main|vinted|occasion|vintage/i, signal: { seconde_main_affinite: 0.9, vintage: 0.6 } },
+  { pattern: /petit budget|pas cher|économ|abordable|promo|soldes/i, signal: { prix_sensibilite: 0.9 } },
+  { pattern: /luxe|haut de gamme|qualité premium|premium/i, signal: { luxe_affinite: 0.9, prix_sensibilite: 0.2 } },
+  { pattern: /minimalist|sobre|épuré|basique/i, signal: { minimaliste: 0.9, bold: 0.1 } },
+  { pattern: /coloré|imprimé|statement|original|fun/i, signal: { bold: 0.9, minimaliste: 0.1 } },
+  { pattern: /streetwear|oversize|sneakers|urbain/i, signal: { streetwear: 0.9, casual: 0.7 } },
+  { pattern: /romantique|fluide|féminin|délicat/i, signal: { romantique: 0.9 } },
+  { pattern: /sport|jogging|running|fitness/i, signal: { sport: 0.9, casual: 0.6 } },
+  { pattern: /décontracté|casual|tous les jours|quotidien/i, signal: { casual: 0.9 } },
+];
+
+export function inferSignalFromMessage(text: string): Partial<StyleVector> {
+  let signal: Partial<StyleVector> = {};
+  for (const { pattern, signal: s } of MESSAGE_SIGNAL_KEYWORDS) {
+    if (pattern.test(text)) signal = { ...signal, ...s };
+  }
+  return signal;
+}
+
+const STYLE_VECTOR_LABELS: Record<keyof StyleVector, string> = {
+  casual: "casual",
+  bold: "bold",
+  minimaliste: "minimaliste",
+  romantique: "romantique",
+  streetwear: "streetwear",
+  prix_sensibilite: "prix-sensible",
+  seconde_main_affinite: "seconde main",
+  luxe_affinite: "luxe",
+  sport: "sport",
+  vintage: "vintage",
+};
+
+export function buildStyleVectorSummary(vector: StyleVector): string {
+  return STYLE_VECTOR_DIMENSIONS.filter((key) => vector[key] > 0.65 || vector[key] < 0.35)
+    .map((key) => `${STYLE_VECTOR_LABELS[key]} ${Math.round(vector[key] * 100)}%`)
+    .join(", ");
 }
 
 // ---------- Conversation ----------
@@ -240,6 +415,11 @@ export function useCart() {
     saveCart(next);
     setItems(next);
     bumpStatsOnAdd(item.source, Math.max(0, item.originalPrice - item.price));
+
+    const profile = loadProfile();
+    const vector = profile.styleVector ?? NEUTRAL_STYLE_VECTOR;
+    const signal = inferSignalFromCart(item);
+    saveProfile({ ...profile, styleVector: updateStyleVector(vector, signal) });
   };
   const remove = (id: string) => {
     const next = loadCart().filter((i) => i.id !== id);

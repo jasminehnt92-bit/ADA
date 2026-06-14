@@ -10,6 +10,8 @@ import { Send, RefreshCw, Search, Tag, Plus, Check } from "lucide-react";
 import {
   useProfile,
   useCart,
+  useStyleVector,
+  inferSignalFromMessage,
   loadConversation,
   saveConversation,
   clearConversation,
@@ -54,6 +56,7 @@ function Chat() {
   const { seed } = useSearch({ from: "/chat" });
   const { profile, ready } = useProfile();
   const { add } = useCart();
+  const { updateVector } = useStyleVector();
 
   const [messages, setMessages] = useState<Msg[]>([
     { id: 0, from: "bot", text: GREETING_TEXT, isGreeting: true },
@@ -102,6 +105,7 @@ function Chat() {
             longueurBuste: profile.longueurBuste,
             longueurJambe: profile.longueurJambe,
             ollamaModel: profile.ollamaModel,
+            styleVector: profile.styleVector,
             preferences: profile.preferences,
           },
         },
@@ -128,6 +132,9 @@ function Chat() {
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+
+    const signal = inferSignalFromMessage(text);
+    if (Object.keys(signal).length > 0) updateVector(signal);
 
     const result = await askAda(historyForClaude);
 
